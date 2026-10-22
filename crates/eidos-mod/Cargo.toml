@@ -1,0 +1,15 @@
+[package]
+name = "eidos-mod"
+description = "Mod folders for the native port of Pokemon Black and White: manifest, rules, options, packages. No game data, no UI."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+tempfile.workspace = true

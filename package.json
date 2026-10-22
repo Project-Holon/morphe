@@ -1,0 +1,57 @@
+{
+  "name": "morphe",
+  "version": "0.1.0",
+  "description": "Shared interface parts for the editors of the native Pokemon Black and White port: themes, menus, search select.",
+  "license": "MIT",
+  "type": "module",
+  "svelte": "./ui/index.ts",
+  "types": "./ui/index.ts",
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "files": [
+    "ui"
+  ],
+  "exports": {
+    ".": {
+      "types": "./ui/index.ts",
+      "svelte": "./ui/index.ts",
+      "default": "./ui/index.ts"
+    },
+    "./theme.css": "./ui/theme.css",
+    "./theme": "./ui/theme.ts",
+    "./menu.svelte": "./ui/menu.svelte.ts",
+    "./cache.svelte": "./ui/cache.svelte.ts",
+    "./dialog": "./ui/dialog.ts",
+    "./ContextMenu.svelte": {
+      "types": "./ui/ContextMenu.svelte",
+      "svelte": "./ui/ContextMenu.svelte",
+      "default": "./ui/ContextMenu.svelte"
+    },
+    "./SearchSelect.svelte": {
+      "types": "./ui/SearchSelect.svelte",
+      "svelte": "./ui/SearchSelect.svelte",
+      "default": "./ui/SearchSelect.svelte"
+    },
+    "./ThemePicker.svelte": {
+      "types": "./ui/ThemePicker.svelte",
+      "svelte": "./ui/ThemePicker.svelte",
+      "default": "./ui/ThemePicker.svelte"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "check": "svelte-check --tsconfig ./tsconfig.json --fail-on-warnings"
+  },
+  "peerDependencies": {
+    "svelte": "^5.0.0"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
+    "@tsconfig/svelte": "^5.0.8",
+    "svelte": "^5.57.2",
+    "svelte-check": "^4.7.7",
+    "typescript": "~5.9.3",
+    "vite": "^8.3.5"
+  }
+}

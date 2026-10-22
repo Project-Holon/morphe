@@ -1,0 +1,16 @@
+[package]
+name = "releases"
+description = "List a GitHub repository's releases and assets, pick one by name and download it with a SHA-256 check."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+ureq = "2"
+
+[dev-dependencies]
+tempfile.workspace = true

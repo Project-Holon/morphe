@@ -19,6 +19,12 @@ fn box_legendaries() {
         let img = battle_front(&Rom::open(&path).unwrap(), species).unwrap();
         assert_eq!((img.width, img.height), (96, 96), "{file}");
         assert!(img.pixels.chunks(4).any(|p| p[3] > 0), "{file}: empty");
+        let rom = Rom::open(&path).unwrap();
+        for g in [nds::sprite::PLAYER_MALE, nds::sprite::PLAYER_FEMALE] {
+            let t = nds::sprite::trainer_front(&rom, g).unwrap();
+            assert_eq!((t.width, t.height), (80, 80), "{file}");
+            assert!(t.pixels.chunks(4).any(|p| p[3] > 0), "{file}: player {g}");
+        }
     }
 }
 

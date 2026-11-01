@@ -42,3 +42,35 @@ pub fn battle_front(rom: &Rom, species: u16) -> Result<Rgba, String> {
 pub fn battle_front_png(rom: &Rom, species: u16) -> Result<Vec<u8>, String> {
     battle_front(rom, species).map(|img| encode_png(&img))
 }
+
+/// The trainer picture archive: 8 members per graphic; the picture's sheet
+/// at +0, its palette at +7, all laid out by the one-cell bank at member 2
+/// (80x80).
+const TRAINER_PICTURES: &str = "a/0/7/2";
+const TRAINER_MEMBERS: usize = 8;
+const TRAINER_LAYOUT: usize = 2;
+
+/// The player's trainer pictures: Hilbert (graphic 0) and Hilda (graphic 1).
+pub const PLAYER_MALE: usize = 0;
+pub const PLAYER_FEMALE: usize = 1;
+
+/// A trainer picture (80x80 RGBA, transparent background).
+pub fn trainer_front(rom: &Rom, graphic: usize) -> Result<Rgba, String> {
+    let archive = Narc::parse(rom.file(TRAINER_PICTURES).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    let member = |i: usize| {
+        archive
+            .raw(i)
+            .map(|raw| crate::lz::decompress_if_compressed(raw).into_owned())
+            .map_err(|e| e.to_string())
+    };
+    let block = graphic * TRAINER_MEMBERS;
+    let tiles = Ncgr::parse(&member(block)?).map_err(|e| e.to_string())?;
+    let palette = Palette::parse(&member(block + 7)?).map_err(|e| e.to_string())?;
+    let bank = Ncer::parse(&member(TRAINER_LAYOUT)?).map_err(|e| e.to_string())?;
+    let cell = bank
+        .cells
+        .first()
+        .ok_or("the trainer layout bank has no cell")?;
+    Ok(render_cell(&bank, cell, &tiles, &palette, 0).image)
+}

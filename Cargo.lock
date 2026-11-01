@@ -128,7 +128,7 @@ dependencies = [
 
 [[package]]
 name = "eidos-mod"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -403,7 +403,7 @@ dependencies = [
 
 [[package]]
 name = "nds"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "png",
  "serde",
@@ -470,7 +470,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "releases"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "serde",
  "serde_json",

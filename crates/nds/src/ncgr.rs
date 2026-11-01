@@ -231,7 +231,8 @@ impl Ncgr {
     }
 }
 
-#[cfg(test)]
+/// A minimal file, for tests and tools.
+#[doc(hidden)]
 pub fn build(tiles_wide: u16, tiles_high: u16, depth: Depth, data: &[u8]) -> Vec<u8> {
     let mut body = Vec::new();
     body.extend_from_slice(&tiles_high.to_le_bytes());

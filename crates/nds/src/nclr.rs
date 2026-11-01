@@ -95,7 +95,8 @@ pub fn bgr555_to_rgba(c: u16) -> [u8; 4] {
     [expand(c), expand(c >> 5), expand(c >> 10), 255]
 }
 
-#[cfg(test)]
+/// A minimal file, for tests and tools.
+#[doc(hidden)]
 pub fn build(format: u32, colors: &[u16]) -> Vec<u8> {
     let mut body = Vec::new();
     body.extend_from_slice(&format.to_le_bytes());

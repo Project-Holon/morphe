@@ -98,7 +98,8 @@ pub fn screen_index(x: usize, y: usize, tiles_wide: usize) -> usize {
     block * 0x400 + (y % 32) * 32 + x % 32
 }
 
-#[cfg(test)]
+/// A minimal file, for tests and tools.
+#[doc(hidden)]
 pub fn build(width: u16, height: u16, entries: &[u16]) -> Vec<u8> {
     let mut body = Vec::new();
     body.extend_from_slice(&width.to_le_bytes());

@@ -167,7 +167,8 @@ impl Ncer {
     }
 }
 
-#[cfg(test)]
+/// A minimal file, for tests and tools.
+#[doc(hidden)]
 pub fn build(mapping: u32, cells: &[&[[u16; 3]]]) -> Vec<u8> {
     let mut body = Vec::new();
     body.extend_from_slice(&(cells.len() as u16).to_le_bytes());

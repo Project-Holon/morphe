@@ -245,8 +245,7 @@ mod tests {
 
     const JSON: &str = r#"[
       {"tag_name":"v0.3.0","name":"Third","draft":false,"prerelease":true,
-       "published_at":"2026-01-03T00:00:00Z","body":"### Fixes
-- **Saves**: kept.",
+       "published_at":"2026-01-03T00:00:00Z","body":"Fixes\n- **Saves**: kept.",
        "assets":[{"name":"kenon-0.3.0-windows-x64.zip","size":10,"url":"https://api/a/1","browser_download_url":"https://dl/1"}]},
       {"tag_name":"v0.2.1","draft":true,"assets":[]},
       {"tag_name":"v0.2.0","name":"Second","draft":false,"prerelease":false,
@@ -264,8 +263,7 @@ mod tests {
         assert!(list[0].prerelease);
         assert_eq!(list[1].assets.len(), 3);
         assert_eq!(list[1].name.as_deref(), Some("Second"));
-        assert_eq!(list[0].body.as_deref(), Some("### Fixes
-- **Saves**: kept."));
+        assert_eq!(list[0].body.as_deref(), Some("Fixes\n- **Saves**: kept."));
         assert_eq!(list[1].body, None);
         assert!(parse_releases("{}").is_err());
     }

@@ -30,6 +30,15 @@ pub struct Manifest {
     /// (eidos sdk/mod_manifest.c), so the editor writes it only when the mod
     /// already declares one (a mod with code); a data-only mod has none.
     pub api: Option<u32>,
+    /// What the mod does, in a sentence or two for players. Empty: none.
+    /// The port ignores this key and the three below (it skips keys it does
+    /// not know); the editor, the launcher and the mod index read them.
+    pub description: String,
+    pub author: String,
+    pub version: String,
+    /// The game code of the cartridge the mod is made for (`IRAF`: White,
+    /// French). Empty: not said.
+    pub game: String,
     /// The lines the editor does not edit, kept in order.
     #[serde(skip)]
     pub other: Vec<String>,
@@ -41,6 +50,10 @@ impl Manifest {
             name: default_name.to_string(),
             order: 0,
             api: None,
+            description: String::new(),
+            author: String::new(),
+            version: String::new(),
+            game: String::new(),
             other: Vec::new(),
         };
         for line in text.lines() {
@@ -61,6 +74,10 @@ impl Manifest {
                         .unwrap_or(0)
                 }
                 "api" => m.api = value.parse().ok(),
+                "description" => m.description = value.to_string(),
+                "author" => m.author = value.to_string(),
+                "version" => m.version = value.to_string(),
+                "game" => m.game = value.to_string(),
                 _ => m.other.push(line.to_string()),
             }
         }
@@ -75,6 +92,24 @@ impl Manifest {
         );
         if let Some(api) = self.api {
             out.push_str(&format!("api = {api}\n"));
+        }
+        // One line each: a line break or a '#' would end the value.
+        let clean = |v: &str| {
+            v.replace(['\n', '\r'], " ")
+                .replace('#', "")
+                .trim()
+                .to_string()
+        };
+        for (key, value) in [
+            ("description", &self.description),
+            ("author", &self.author),
+            ("version", &self.version),
+            ("game", &self.game),
+        ] {
+            let value = clean(value);
+            if !value.is_empty() {
+                out.push_str(&format!("{key} = {value}\n"));
+            }
         }
         for line in &self.other {
             if !line.starts_with("# Written by kenon.") {
@@ -191,6 +226,25 @@ mod tests {
         assert!(text.contains("rule = foo bar\n"));
         assert!(text.contains("# note\n"));
         assert_eq!(Manifest::parse(&text, "dir").name, "Hard mode");
+    }
+
+    #[test]
+    fn description_author_version_game() {
+        let mut m = Manifest::parse("name = A\n", "d");
+        m.description = "Harder trainers.\nAnd #levels".into();
+        m.author = "Someone".into();
+        m.version = "0.2.0".into();
+        m.game = "IRAF".into();
+        let text = m.write();
+        assert!(
+            text.contains("description = Harder trainers. And levels\n"),
+            "{text}"
+        );
+        let back = Manifest::parse(&text, "d");
+        assert_eq!(back.author, "Someone");
+        assert_eq!(back.version, "0.2.0");
+        assert_eq!(back.game, "IRAF");
+        assert!(!Manifest::parse("name = B", "d").write().contains("game"));
     }
 
     #[test]

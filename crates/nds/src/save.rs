@@ -39,7 +39,9 @@
 //! LCG 0x41C64E6D/0x6073 seeded with the checksum. The checksum is the sum
 //! of the decrypted halfwords, so a wrong decode is caught. Species is the
 //! first halfword of block A; the egg flag is bit 30 of the IV word, 0x10
-//! into block B.
+//! into block B; the name is the first 11 units of block C. A party
+//! Pokemon's bytes 0x88..0xDC (its battle stats) are XORed with the same
+//! LCG seeded with the PID: level at 0x8C, HP at 0x8E, max HP at 0x90.
 
 const COPY_SIZE: usize = 0x23F9C;
 const SECOND_COPY: usize = 0x24000;
@@ -89,6 +91,12 @@ pub enum Game {
 pub struct Member {
     pub species: u16,
     pub egg: bool,
+    /// The name the game shows: the nickname, or the species name in the
+    /// save's language when it has none.
+    pub name: String,
+    pub level: u8,
+    pub hp: u16,
+    pub max_hp: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -250,9 +258,28 @@ fn member(data: &[u8]) -> Option<Member> {
     let at = |k: usize, off: usize| order[k] as usize * 16 + off / 2;
     let species = words[at(0, 0)];
     let iv = words[at(1, 0x10)] as u32 | (words[at(1, 0x12)] as u32) << 16;
+    let name_units: Vec<u8> = (0..11)
+        .flat_map(|i| words[at(2, i * 2)].to_le_bytes())
+        .collect();
+    let mut stats: Vec<u16> = data[MON_BOX_SIZE..MON_SIZE]
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|&c| u16::from_le_bytes(c))
+        .collect();
+    let mut seed = pid;
+    for w in stats.iter_mut() {
+        seed = seed.wrapping_mul(0x41C6_4E6D).wrapping_add(0x6073);
+        *w ^= (seed >> 16) as u16;
+    }
+    // stats[k] is the halfword at 0x88 + 2k
     (species != 0).then_some(Member {
         species,
         egg: iv >> 30 & 1 != 0,
+        name: name(&name_units),
+        level: stats[2] as u8,
+        hp: stats[3],
+        max_hp: stats[4],
     })
 }
 
@@ -274,7 +301,7 @@ pub fn read(image: &[u8]) -> Result<Option<Save>, Error> {
     let party_block = block(&copies, &PARTY, "party")?;
     let count = (u32_at(party_block, 4) as usize).min(6);
     let party = (0..count)
-        .filter_map(|i| member(&party_block[8 + i * MON_SIZE..8 + i * MON_SIZE + MON_BOX_SIZE]))
+        .filter_map(|i| member(&party_block[8 + i * MON_SIZE..8 + (i + 1) * MON_SIZE]))
         .collect();
     let location = block(&copies, &LOCATION, "location")?;
     let misc = block(&copies, &MISC, "progress")?;
@@ -328,6 +355,9 @@ mod tests {
         if egg {
             words[order[1] as usize * 16 + 9] = 0x4000;
         }
+        for (i, c) in "Pig".encode_utf16().chain([0xFFFF]).enumerate() {
+            words[order[2] as usize * 16 + i] = c;
+        }
         let checksum = words.iter().fold(0u16, |a, &w| a.wrapping_add(w));
         let mut seed = checksum as u32;
         for w in words.iter_mut() {
@@ -339,6 +369,16 @@ mod tests {
         out[6..8].copy_from_slice(&checksum.to_le_bytes());
         for (i, w) in words.iter().enumerate() {
             out[8 + i * 2..10 + i * 2].copy_from_slice(&w.to_le_bytes());
+        }
+        let mut stats = [0u16; 42];
+        stats[2] = 12;
+        stats[3] = 30;
+        stats[4] = 35;
+        let mut seed = pid;
+        for (i, w) in stats.iter().enumerate() {
+            seed = seed.wrapping_mul(0x41C6_4E6D).wrapping_add(0x6073);
+            let v = w ^ (seed >> 16) as u16;
+            out[MON_BOX_SIZE + i * 2..MON_BOX_SIZE + i * 2 + 2].copy_from_slice(&v.to_le_bytes());
         }
         out
     }
@@ -384,18 +424,12 @@ mod tests {
         assert_eq!(s.game, Some(Game::Black));
         assert_eq!(s.seconds, 3600 + 30 * 60 + 5);
         assert_eq!(s.badges.count_ones(), 3);
+        let seen: Vec<_> = s.party.iter().map(|m| (m.species, m.egg)).collect();
+        assert_eq!(seen, vec![(498, false), (504, true)]);
+        let m = &s.party[0];
         assert_eq!(
-            s.party,
-            vec![
-                Member {
-                    species: 498,
-                    egg: false
-                },
-                Member {
-                    species: 504,
-                    egg: true
-                }
-            ]
+            (m.name.as_str(), m.level, m.hp, m.max_hp),
+            ("Pig", 12, 30, 35)
         );
         assert_eq!(s.zone, 397);
     }

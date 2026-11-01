@@ -21,3 +21,49 @@ fn box_legendaries() {
         assert!(img.pixels.chunks(4).any(|p| p[3] > 0), "{file}: empty");
     }
 }
+
+/// The badge case from real ROMs: eight 32x64 badges and outlines, each
+/// with something drawn. With `NDS_BADGES_OUT` set, writes them as PNG.
+#[test]
+fn badge_case() {
+    let Some(dir) = std::env::var_os("NDS_ROMS").map(std::path::PathBuf::from) else {
+        return;
+    };
+    for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+        let path = entry.path();
+        if path.extension().is_none_or(|x| x != "nds") {
+            continue;
+        }
+        let art = nds::badges::badge_art(&Rom::open(&path).unwrap()).unwrap();
+        for (i, (b, o)) in art.badges.iter().zip(&art.outlines).enumerate() {
+            assert!(
+                b.pixels.chunks(4).any(|p| p[3] > 0),
+                "{}: badge {i}",
+                path.display()
+            );
+            assert!(
+                o.pixels.chunks(4).any(|p| p[3] > 0),
+                "{}: outline {i}",
+                path.display()
+            );
+            if let Some(out) = std::env::var_os("NDS_BADGES_OUT") {
+                let out = std::path::PathBuf::from(out);
+                let stem = path
+                    .file_stem()
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace(' ', "_");
+                std::fs::write(
+                    out.join(format!("{stem}_b{i}.png")),
+                    nds::image::encode_png(b),
+                )
+                .unwrap();
+                std::fs::write(
+                    out.join(format!("{stem}_o{i}.png")),
+                    nds::image::encode_png(o),
+                )
+                .unwrap();
+            }
+        }
+    }
+}

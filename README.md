@@ -25,6 +25,7 @@ Check: `npm install && npm run check`.
 ## Rust workspace (`crates/`)
 
 - `eidos-mod`: mod folders without a ROM and without a UI. The manifest (`eidos_mod.txt`), settings, hook lines, rule files and the rule checker, tables, conflicts between mods, the options grammar, `.bw` packages with safety limits, and the code-mod SDK (header, contract, module check). `tools/mod-names.mjs` regenerates `src/modnames/rules.txt` from an eidos checkout.
+- `nds`: Nintendo DS cartridges and their 2D formats, read from the player's own ROM: NitroFS, NARC, LZ and BLZ, palettes, characters, cells and screens, drawn to RGBA and PNG; `sprite` draws a Pokemon's battle sprite (the box legendaries for the start screens). No game data.
 - `releases`: lists a GitHub repository's releases through the public API, picks an asset by name pattern, downloads it and checks its SHA-256. A token is optional (private repositories).
 
 Check: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test`. Set `CARGO_TARGET_DIR` to keep build output out of the checkout.
@@ -35,8 +36,9 @@ Apps pin a tag, never a branch.
 
 ```toml
 # Cargo.toml
-eidos-mod = { git = "https://github.com/Project-Holon/morphe", tag = "v0.1.0" }
-releases = { git = "https://github.com/Project-Holon/morphe", tag = "v0.1.0" }
+eidos-mod = { git = "https://github.com/Project-Holon/morphe", tag = "v0.2.0" }
+nds = { git = "https://github.com/Project-Holon/morphe", tag = "v0.2.0" }
+releases = { git = "https://github.com/Project-Holon/morphe", tag = "v0.2.0" }
 ```
 
 ```json

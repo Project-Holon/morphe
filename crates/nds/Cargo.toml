@@ -1,0 +1,12 @@
+[package]
+name = "nds"
+description = "Nintendo DS cartridges and 2D formats (NitroFS, NARC, LZ, NCLR, NCGR, NCER, NSCR) for kenon and the eidos launcher. Reads the player's own ROM; no game data."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+png = "0.18"
+serde.workspace = true
+sha1_smol = "1"

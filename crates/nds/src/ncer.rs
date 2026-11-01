@@ -168,7 +168,7 @@ impl Ncer {
 }
 
 #[cfg(test)]
-pub(crate) fn build(mapping: u32, cells: &[&[[u16; 3]]]) -> Vec<u8> {
+pub fn build(mapping: u32, cells: &[&[[u16; 3]]]) -> Vec<u8> {
     let mut body = Vec::new();
     body.extend_from_slice(&(cells.len() as u16).to_le_bytes());
     body.extend_from_slice(&0u16.to_le_bytes());

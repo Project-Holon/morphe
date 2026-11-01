@@ -107,12 +107,12 @@ pub fn block_offset(bytes: &[u8], magic: &[u8; 4], want: &[u8; 4]) -> Result<usi
     Ok(body.as_ptr() as usize - bytes.as_ptr() as usize)
 }
 
-pub(crate) fn read_u16(bytes: &[u8], at: usize) -> Result<u16, Error> {
+pub fn read_u16(bytes: &[u8], at: usize) -> Result<u16, Error> {
     let b = bytes.get(at..at + 2).ok_or(Error::Truncated)?;
     Ok(u16::from_le_bytes([b[0], b[1]]))
 }
 
-pub(crate) fn read_u32(bytes: &[u8], at: usize) -> Result<u32, Error> {
+pub fn read_u32(bytes: &[u8], at: usize) -> Result<u32, Error> {
     let b = bytes.get(at..at + 4).ok_or(Error::Truncated)?;
     Ok(u32::from_le_bytes(b.try_into().unwrap()))
 }

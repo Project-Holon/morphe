@@ -447,69 +447,69 @@ fn parse_fnt(fnt: &[u8]) -> Result<HashMap<String, u16>, Error> {
     Ok(paths)
 }
 
-#[cfg(test)]
-pub(crate) mod tests {
-    use super::*;
-
-    /// A tiny image: files "a/0" (id 0) and "x.bin" (id 1), and one
-    /// uncompressed overlay (file id 2) loaded at 0x02100000.
-    pub(crate) fn tiny_rom() -> Vec<u8> {
-        let mut rom = vec![0u8; 0x1000];
-        rom[..12].copy_from_slice(b"POKEMON B\0\0\0");
-        rom[0x0C..0x10].copy_from_slice(b"IRBO");
-        // FNT at 0x200: two directories (root, "a").
-        let mut fnt = Vec::new();
-        fnt.extend_from_slice(&16u32.to_le_bytes());
-        fnt.extend_from_slice(&1u16.to_le_bytes()); // root's first file: x.bin
-        fnt.extend_from_slice(&2u16.to_le_bytes()); // directory count
-        fnt.extend_from_slice(&0u32.to_le_bytes()); // patched below
-        fnt.extend_from_slice(&0u16.to_le_bytes()); // a's first file: a/0
-        fnt.extend_from_slice(&0xF000u16.to_le_bytes());
-        // Root entries: x.bin, then directory "a" (id 0xF001).
-        fnt.push(5);
-        fnt.extend_from_slice(b"x.bin");
-        fnt.push(0x81);
-        fnt.push(b'a');
-        fnt.extend_from_slice(&0xF001u16.to_le_bytes());
-        fnt.push(0);
-        let a_list = fnt.len() as u32;
-        fnt[8..12].copy_from_slice(&a_list.to_le_bytes());
-        fnt.push(1);
-        fnt.push(b'0');
-        fnt.push(0);
-        rom[0x200..0x200 + fnt.len()].copy_from_slice(&fnt);
-        // FAT at 0x300: three files.
-        let files = [(0x800u32, 0x804u32), (0x900, 0x902), (0xA00, 0xA08)];
-        for (i, (s, e)) in files.iter().enumerate() {
-            rom[0x300 + i * 8..0x304 + i * 8].copy_from_slice(&s.to_le_bytes());
-            rom[0x304 + i * 8..0x308 + i * 8].copy_from_slice(&e.to_le_bytes());
-        }
-        rom[0x800..0x804].copy_from_slice(b"NARC");
-        rom[0x900..0x902].copy_from_slice(b"hi");
-        rom[0xA00..0xA08].copy_from_slice(b"overlay!");
-        // Overlay table at 0x400: one entry, file id 2.
-        let y9 = [0u32, 0x0210_0000, 8, 0, 0, 0, 2, 0];
-        for (i, w) in y9.iter().enumerate() {
-            rom[0x400 + i * 4..0x404 + i * 4].copy_from_slice(&w.to_le_bytes());
-        }
-        // ARM9 at 0xB00, 16 stored bytes (a zero growth word: stored).
-        rom[0xB00..0xB04].copy_from_slice(b"ARM9");
-        let put = |rom: &mut Vec<u8>, at: usize, v: u32| {
-            rom[at..at + 4].copy_from_slice(&v.to_le_bytes())
-        };
-        put(&mut rom, 0x20, 0xB00);
-        put(&mut rom, 0x28, 0x0200_4000);
-        put(&mut rom, 0x2C, 16);
-        put(&mut rom, 0x40, 0x200);
-        put(&mut rom, 0x44, fnt.len() as u32);
-        put(&mut rom, 0x48, 0x300);
-        put(&mut rom, 0x4C, 24);
-        put(&mut rom, 0x50, 0x400);
-        put(&mut rom, 0x54, 32);
-        let crc = crc16(&rom[..0x15E]);
-        rom[0x15E..0x160].copy_from_slice(&crc.to_le_bytes());
-        rom
+/// A tiny image for tests: files "a/0" (id 0) and "x.bin" (id 1), and
+/// one uncompressed overlay (file id 2) loaded at 0x02100000.
+#[doc(hidden)]
+pub fn tiny_rom() -> Vec<u8> {
+    let mut rom = vec![0u8; 0x1000];
+    rom[..12].copy_from_slice(b"POKEMON B\0\0\0");
+    rom[0x0C..0x10].copy_from_slice(b"IRBO");
+    // FNT at 0x200: two directories (root, "a").
+    let mut fnt = Vec::new();
+    fnt.extend_from_slice(&16u32.to_le_bytes());
+    fnt.extend_from_slice(&1u16.to_le_bytes()); // root's first file: x.bin
+    fnt.extend_from_slice(&2u16.to_le_bytes()); // directory count
+    fnt.extend_from_slice(&0u32.to_le_bytes()); // patched below
+    fnt.extend_from_slice(&0u16.to_le_bytes()); // a's first file: a/0
+    fnt.extend_from_slice(&0xF000u16.to_le_bytes());
+    // Root entries: x.bin, then directory "a" (id 0xF001).
+    fnt.push(5);
+    fnt.extend_from_slice(b"x.bin");
+    fnt.push(0x81);
+    fnt.push(b'a');
+    fnt.extend_from_slice(&0xF001u16.to_le_bytes());
+    fnt.push(0);
+    let a_list = fnt.len() as u32;
+    fnt[8..12].copy_from_slice(&a_list.to_le_bytes());
+    fnt.push(1);
+    fnt.push(b'0');
+    fnt.push(0);
+    rom[0x200..0x200 + fnt.len()].copy_from_slice(&fnt);
+    // FAT at 0x300: three files.
+    let files = [(0x800u32, 0x804u32), (0x900, 0x902), (0xA00, 0xA08)];
+    for (i, (s, e)) in files.iter().enumerate() {
+        rom[0x300 + i * 8..0x304 + i * 8].copy_from_slice(&s.to_le_bytes());
+        rom[0x304 + i * 8..0x308 + i * 8].copy_from_slice(&e.to_le_bytes());
     }
+    rom[0x800..0x804].copy_from_slice(b"NARC");
+    rom[0x900..0x902].copy_from_slice(b"hi");
+    rom[0xA00..0xA08].copy_from_slice(b"overlay!");
+    // Overlay table at 0x400: one entry, file id 2.
+    let y9 = [0u32, 0x0210_0000, 8, 0, 0, 0, 2, 0];
+    for (i, w) in y9.iter().enumerate() {
+        rom[0x400 + i * 4..0x404 + i * 4].copy_from_slice(&w.to_le_bytes());
+    }
+    // ARM9 at 0xB00, 16 stored bytes (a zero growth word: stored).
+    rom[0xB00..0xB04].copy_from_slice(b"ARM9");
+    let put =
+        |rom: &mut Vec<u8>, at: usize, v: u32| rom[at..at + 4].copy_from_slice(&v.to_le_bytes());
+    put(&mut rom, 0x20, 0xB00);
+    put(&mut rom, 0x28, 0x0200_4000);
+    put(&mut rom, 0x2C, 16);
+    put(&mut rom, 0x40, 0x200);
+    put(&mut rom, 0x44, fnt.len() as u32);
+    put(&mut rom, 0x48, 0x300);
+    put(&mut rom, 0x4C, 24);
+    put(&mut rom, 0x50, 0x400);
+    put(&mut rom, 0x54, 32);
+    let crc = crc16(&rom[..0x15E]);
+    rom[0x15E..0x160].copy_from_slice(&crc.to_le_bytes());
+    rom
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
 
     #[test]
     fn reads_files_overlays_and_arm9() {

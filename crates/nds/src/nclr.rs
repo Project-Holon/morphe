@@ -96,7 +96,7 @@ pub fn bgr555_to_rgba(c: u16) -> [u8; 4] {
 }
 
 #[cfg(test)]
-pub(crate) fn build(format: u32, colors: &[u16]) -> Vec<u8> {
+pub fn build(format: u32, colors: &[u16]) -> Vec<u8> {
     let mut body = Vec::new();
     body.extend_from_slice(&format.to_le_bytes());
     body.extend_from_slice(&0u32.to_le_bytes());

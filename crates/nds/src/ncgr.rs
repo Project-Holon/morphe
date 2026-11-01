@@ -232,7 +232,7 @@ impl Ncgr {
 }
 
 #[cfg(test)]
-pub(crate) fn build(tiles_wide: u16, tiles_high: u16, depth: Depth, data: &[u8]) -> Vec<u8> {
+pub fn build(tiles_wide: u16, tiles_high: u16, depth: Depth, data: &[u8]) -> Vec<u8> {
     let mut body = Vec::new();
     body.extend_from_slice(&tiles_high.to_le_bytes());
     body.extend_from_slice(&tiles_wide.to_le_bytes());

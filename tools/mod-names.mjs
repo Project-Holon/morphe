@@ -44,7 +44,8 @@ const events = [];
 for (const name of ruleJson.events) {
   const e = byName.get(name);
   if (!e) fail(`rules.json names ${name}, events.json has no such event`);
-  const fields = e.fields.map((f) => ({
+  // Padding (`pad`, `<name>_pad`, no doc) holds nothing a rule could use.
+  const fields = e.fields.filter((f) => !(/(^|_)pad$/.test(f.name) && !f.doc)).map((f) => ({
     name: f.rule_name,
     kind: f.count !== null ? "list" : f.type === "EidosMonRef" ? "mon" : "int",
     flags: (f.writable ? "m" : "") + (/^int\d+_t$/.test(f.type) ? "s" : "") || "-",

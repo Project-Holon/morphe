@@ -18,11 +18,48 @@ fn errors(text: &str, ev: Option<&str>) -> Vec<String> {
 #[test]
 fn tables_have_the_ports_counts() {
     let n = rule_names();
-    assert_eq!(n.events.len(), 58);
+    assert_eq!(n.events.len(), 65);
     assert_eq!(n.states.len(), 62);
     let wild = n.event("encounter.wild").unwrap();
     assert!(wild.fields.iter().any(|f| f.name == "double"));
     assert!(n.event("battle.faint").unwrap().fields.len() == 6);
+    // interface 5: padding is left out of the tables
+    assert!(n
+        .events
+        .iter()
+        .flat_map(|e| &e.fields)
+        .all(|f| !f.name.ends_with("pad")));
+    let field = |ev: &str, name: &str| {
+        n.event(ev)
+            .unwrap()
+            .fields
+            .iter()
+            .find(|f| f.name == name)
+            .unwrap_or_else(|| panic!("{ev}.{name}"))
+            .clone()
+    };
+    assert!(field("battle.exp", "share").writable);
+    assert!(field("battle.ai", "move").writable);
+    assert!(field("battle.ai", "scores").signed);
+    assert!(field("battle.stat", "delta").signed);
+    assert!(!field("battle.turn", "weather").writable);
+}
+
+#[test]
+fn interface_5_rules() {
+    for (text, ev) in [
+        ("language 1\nrule no_share on battle.exp\n    do set event.share 0\n", "battle.exp"),
+        ("language 1\nrule first on battle.ai\n    when event.stage == 2\n    do set event.move 0\n", "battle.ai"),
+        ("language 1\nrule rain on battle.turn\n    when event.weather == 1\n    do add money 1\n", "battle.turn"),
+    ] {
+        assert!(errors(text, Some(ev)).is_empty(), "{text}: {:?}", errors(text, Some(ev)));
+    }
+    // a field the event does not write is refused
+    assert!(!errors(
+        "language 1\nrule r on battle.turn\n    do set event.turn 0\n",
+        Some("battle.turn")
+    )
+    .is_empty());
 }
 
 #[test]

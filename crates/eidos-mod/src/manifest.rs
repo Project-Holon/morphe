@@ -39,6 +39,9 @@ pub struct Manifest {
     /// The game code of the cartridge the mod is made for (`IRAF`: White,
     /// French). Empty: not said.
     pub game: String,
+    /// Words that sort the mod in the mod index (`tags = hard, rules`):
+    /// lowercased, without commas or empty ones. The port ignores the key.
+    pub tags: Vec<String>,
     /// The lines the editor does not edit, kept in order.
     #[serde(skip)]
     pub other: Vec<String>,
@@ -54,6 +57,7 @@ impl Manifest {
             author: String::new(),
             version: String::new(),
             game: String::new(),
+            tags: Vec::new(),
             other: Vec::new(),
         };
         for line in text.lines() {
@@ -78,6 +82,7 @@ impl Manifest {
                 "author" => m.author = value.to_string(),
                 "version" => m.version = value.to_string(),
                 "game" => m.game = value.to_string(),
+                "tags" => m.tags = clean_tags(value.split(',')),
                 _ => m.other.push(line.to_string()),
             }
         }
@@ -111,6 +116,10 @@ impl Manifest {
                 out.push_str(&format!("{key} = {value}\n"));
             }
         }
+        let tags = clean_tags(self.tags.iter().map(|t| clean(t)));
+        if !tags.is_empty() {
+            out.push_str(&format!("tags = {}\n", tags.join(", ")));
+        }
         for line in &self.other {
             if !line.starts_with("# Written by kenon.") {
                 out.push_str(line);
@@ -119,6 +128,19 @@ impl Manifest {
         }
         out
     }
+}
+
+/// Tags as the manifest keeps them: trimmed, lowercased, no commas, no
+/// empty or repeated ones, in the order given.
+pub fn clean_tags<S: AsRef<str>>(tags: impl IntoIterator<Item = S>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for t in tags {
+        let t = t.as_ref().replace(',', " ").trim().to_lowercase();
+        if !t.is_empty() && !out.contains(&t) {
+            out.push(t);
+        }
+    }
+    out
 }
 
 /// The editor's own project notes.
@@ -245,6 +267,19 @@ mod tests {
         assert_eq!(back.version, "0.2.0");
         assert_eq!(back.game, "IRAF");
         assert!(!Manifest::parse("name = B", "d").write().contains("game"));
+    }
+
+    #[test]
+    fn tags() {
+        let m = Manifest::parse("name = A\ntags = Hard, rules,, hard , Nuzlocke\n", "d");
+        assert_eq!(m.tags, vec!["hard", "rules", "nuzlocke"]);
+        assert!(m.other.is_empty());
+        let text = m.write();
+        assert!(text.contains("tags = hard, rules, nuzlocke\n"), "{text}");
+        let mut m = Manifest::parse("name = B", "d");
+        assert!(!m.write().contains("tags"));
+        m.tags = vec!["A,B".into(), "#x".into(), " ".into()];
+        assert_eq!(Manifest::parse(&m.write(), "d").tags, vec!["a b", "x"]);
     }
 
     #[test]

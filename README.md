@@ -24,7 +24,7 @@ Check: `npm install && npm run check`.
 
 ## Rust workspace (`crates/`)
 
-- `eidos-mod`: mod folders without a ROM and without a UI. The manifest (`eidos_mod.txt`), settings, hook lines, rule files and the rule checker, tables, conflicts between mods, the options grammar, `.bw` packages with safety limits, and the code-mod SDK (header, contract, module check). `tools/mod-names.mjs` regenerates `src/modnames/rules.txt` from an eidos checkout.
+- `eidos-mod`: mod folders without a ROM and without a UI. The manifest (`eidos_mod.txt`, with the description, author, version, game and tags the editor and the mod index read), settings, hook lines, rule files and the rule checker, tables, conflicts between mods, the options grammar, `.bw` packages with safety limits, and the code-mod SDK (header, contract, module check). `tools/mod-names.mjs` regenerates `src/modnames/rules.txt` from an eidos checkout.
 - `nds`: Nintendo DS cartridges and their 2D formats, read from the player's own ROM: NitroFS, NARC, LZ and BLZ, palettes, characters, cells and screens, drawn to RGBA and PNG; `sprite` draws a Pokemon's battle sprite (the box legendaries for the start screens) and the trainer pictures (Hilbert and Hilda); `msg` reads and writes the game's text; `place` gives each zone's place name; `badges` draws the eight badges and their empty slots from the badge case; `save` reads a Black or White save file (trainer, team with names, levels and HP, badges, play time, where the player saved). No game data.
 - `releases`: lists a GitHub repository's releases through the public API, picks an asset by name pattern, downloads it and checks its SHA-256. A token is optional (private repositories).
 
@@ -36,9 +36,9 @@ Apps pin a tag, never a branch.
 
 ```toml
 # Cargo.toml
-eidos-mod = { git = "https://github.com/Project-Holon/morphe", tag = "v0.4.1" }
-nds = { git = "https://github.com/Project-Holon/morphe", tag = "v0.4.1" }
-releases = { git = "https://github.com/Project-Holon/morphe", tag = "v0.4.1" }
+eidos-mod = { git = "https://github.com/Project-Holon/morphe", tag = "v0.5.0" }
+nds = { git = "https://github.com/Project-Holon/morphe", tag = "v0.5.0" }
+releases = { git = "https://github.com/Project-Holon/morphe", tag = "v0.5.0" }
 ```
 
 ```json

@@ -1,0 +1,21 @@
+[package]
+name = "katalogos"
+description = "Builds an eidos mod's release files (mod.bw, mod.json) and checks the katalogos mod index."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "katalogos"
+path = "src/main.rs"
+
+[dependencies]
+eidos-mod = { path = "../eidos-mod" }
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+ureq = "2"
+
+[dev-dependencies]
+tempfile.workspace = true

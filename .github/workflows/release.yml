@@ -1,0 +1,43 @@
+name: Release
+
+# A version tag (v0.6.0 and on): test the workspace, build the katalogos tool
+# for Linux x86_64 and put it on the tag's release. The katalogos index's
+# workflows download it from the newest release.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "An existing tag to build and attach (v0.6.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  katalogos:
+    runs-on: ubuntu-24.04
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test
+        run: cargo test --workspace --locked
+      - name: Build
+        run: |
+          cargo build --release --locked -p katalogos
+          mkdir dist
+          cp target/release/katalogos dist/katalogos-linux-x86_64
+          (cd dist && sha256sum katalogos-linux-x86_64 > SHA256SUMS)
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "morphe $TAG" --notes "The crates at $TAG, and the katalogos tool for Linux x86_64."
+          gh release upload "$TAG" dist/katalogos-linux-x86_64 dist/SHA256SUMS --clobber

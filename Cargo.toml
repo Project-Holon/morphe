@@ -1,9 +1,9 @@
 [workspace]
 resolver = "2"
-members = ["crates/eidos-mod", "crates/nds", "crates/releases"]
+members = ["crates/eidos-mod", "crates/katalogos", "crates/nds", "crates/releases"]
 
 [workspace.package]
-version = "0.5.1"
+version = "0.6.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/Project-Holon/morphe"

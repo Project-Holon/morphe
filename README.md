@@ -24,9 +24,9 @@ Check: `npm install && npm run check`.
 
 ## Rust workspace (`crates/`)
 
-- `eidos-mod`: mod folders without a ROM and without a UI. The manifest (`eidos_mod.txt`, with the description, author, version, game and tags the editor and the mod index read), settings, hook lines, rule files and the rule checker, tables, conflicts between mods, the options grammar, `.bw` packages with safety limits, and the code-mod SDK (header, contract, module check). `tools/mod-names.mjs` regenerates `src/modnames/rules.txt` from an eidos checkout.
-- `nds`: Nintendo DS cartridges and their 2D formats, read from the player's own ROM: NitroFS, NARC, LZ and BLZ, palettes, characters, cells and screens, drawn to RGBA and PNG; `sprite` draws a Pokemon's battle sprite (the box legendaries for the start screens) and the trainer pictures (Hilbert and Hilda); `msg` reads and writes the game's text; `place` gives each zone's place name; `badges` draws the eight badges and their empty slots from the badge case; `save` reads a Black or White save file (trainer, team with names, levels and HP, badges, play time, where the player saved). No game data.
-- `katalogos` (a command-line tool): builds an eidos mod's release files (`mod.bw` and `mod.json`) and checks the katalogos mod index (Project-Holon/katalogos). `katalogos pack <mod-dir> (--repo owner/name | --official <id>) --version x.y.z [--out dir]`, `katalogos inspect <mod.json> <mod.bw>`, `katalogos check <index.json>`, `katalogos pending <index.json>`. Its library part holds the `mod.json` and index formats and their checks, for programs that read the index; the `net` feature (on by default) adds the downloads. Install it with `cargo install --git https://github.com/Project-Holon/morphe --tag <tag> katalogos`.
+- `eidos-mod`: mod folders without a ROM and without a UI. The manifest (`eidos_mod.txt`, with the description, author, version, game, tags and icon (`item <n>`, `species <n>` or a square PNG) the editor and the mod index read), settings, hook lines, rule files and the rule checker, tables, conflicts between mods, the options grammar, `.bw` packages with safety limits, and the code-mod SDK (header, contract, module check). `tools/mod-names.mjs` regenerates `src/modnames/rules.txt` from an eidos checkout.
+- `nds`: Nintendo DS cartridges and their 2D formats, read from the player's own ROM: NitroFS, NARC, LZ and BLZ, palettes, characters, cells and screens, drawn to RGBA and PNG; `sprite` draws a Pokemon's battle sprite (the box legendaries for the start screens) and the trainer pictures (Hilbert and Hilda); `item` draws an item's bag icon; `msg` reads and writes the game's text; `place` gives each zone's place name; `badges` draws the eight badges and their empty slots from the badge case; `save` reads a Black or White save file (trainer, team with names, levels and HP, badges, play time, where the player saved). No game data.
+- `katalogos` (a command-line tool): builds an eidos mod's release files (`mod.bw` and `mod.json`) and checks the katalogos mod index (Project-Holon/katalogos); a mod's file icon goes beside them as `icon.png`. `katalogos pack <mod-dir> (--repo owner/name | --official <id>) --version x.y.z [--out dir]`, `katalogos inspect <mod.json> <mod.bw> [icon.png]`, `katalogos check <index.json>`, `katalogos pending <index.json>`. Its library part holds the `mod.json` and index formats and their checks, for programs that read the index; the `net` feature (on by default) adds the downloads. Install it with `cargo install --git https://github.com/Project-Holon/morphe --tag <tag> katalogos`.
 - `releases`: lists a GitHub repository's releases through the public API, picks an asset by name pattern, downloads it and checks its SHA-256. A token is optional (private repositories).
 
 Check: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test`. Set `CARGO_TARGET_DIR` to keep build output out of the checkout.
@@ -37,9 +37,9 @@ Apps pin a tag, never a branch.
 
 ```toml
 # Cargo.toml
-eidos-mod = { git = "https://github.com/Project-Holon/morphe", tag = "v0.6.1" }
-nds = { git = "https://github.com/Project-Holon/morphe", tag = "v0.6.1" }
-releases = { git = "https://github.com/Project-Holon/morphe", tag = "v0.6.1" }
+eidos-mod = { git = "https://github.com/Project-Holon/morphe", tag = "v0.7.0" }
+nds = { git = "https://github.com/Project-Holon/morphe", tag = "v0.7.0" }
+releases = { git = "https://github.com/Project-Holon/morphe", tag = "v0.7.0" }
 ```
 
 ```json

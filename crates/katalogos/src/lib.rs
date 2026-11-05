@@ -72,6 +72,10 @@ pub struct ModJson {
     pub official: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub multiplayer: Option<u32>,
+    /// The mod's picture: `{"item":280}`, `{"species":25}`, or
+    /// `{"file":"icon.png"}` (a file the release carries beside mod.json).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<IconRef>,
     pub games: Vec<String>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub game_code: String,
@@ -82,6 +86,18 @@ pub struct ModJson {
     pub has_code: bool,
     pub rules: usize,
     pub package: Package,
+}
+
+/// The file name a release gives a mod's own icon.
+pub const ICON_FILE: &str = "icon.png";
+
+/// A mod's picture as mod.json writes it.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum IconRef {
+    Item(u16),
+    Species(u16),
+    File(String),
 }
 
 /// One line of the index: an official mod of this repository (`mod`, with
@@ -252,7 +268,39 @@ pub fn pack(dir: &Path, origin: &Origin, version: &str, out: &Path) -> Result<Mo
     }
     let games = games_of(m.game.trim())?;
     let (rules, has_code, multiplayer) = manifest_counts(&text);
+    // an icon line the manifest could not read stays in `other`
+    if m.icon.is_none()
+        && m.other
+            .iter()
+            .any(|l| l.split('=').next().is_some_and(|k| k.trim() == "icon"))
+    {
+        let line = m
+            .other
+            .iter()
+            .find(|l| l.split('=').next().is_some_and(|k| k.trim() == "icon"))
+            .unwrap();
+        let value = line
+            .split_once('=')
+            .map_or("", |(_, v)| v.split('#').next().unwrap_or("").trim());
+        let why = eidos_mod::manifest::Icon::parse(value)
+            .err()
+            .unwrap_or_default();
+        return Err(format!(
+            "the manifest's icon = {value} does not read: {why}"
+        ));
+    }
     fs::create_dir_all(out).map_err(|e| e.to_string())?;
+    let icon = match &m.icon {
+        None => None,
+        Some(eidos_mod::manifest::Icon::Item(n)) => Some(IconRef::Item(*n)),
+        Some(eidos_mod::manifest::Icon::Species(n)) => Some(IconRef::Species(*n)),
+        Some(eidos_mod::manifest::Icon::File(p)) => {
+            let bytes = fs::read(dir.join(p)).map_err(|e| format!("the icon {p}: {e}"))?;
+            eidos_mod::manifest::check_icon_png(&bytes).map_err(|e| format!("{p}: {e}"))?;
+            fs::write(out.join(ICON_FILE), &bytes).map_err(|e| e.to_string())?;
+            Some(IconRef::File(ICON_FILE.into()))
+        }
+    };
     let bw = out.join(PACKAGE);
     eidos_mod::package::pack(dir, &bw).map_err(|e| format!("packing: {e}"))?;
     let info = eidos_mod::package::inspect(&bw)
@@ -274,6 +322,7 @@ pub fn pack(dir: &Path, origin: &Origin, version: &str, out: &Path) -> Result<Mo
         path,
         official,
         multiplayer,
+        icon,
         games,
         game_code: m.game.trim().to_string(),
         tags: m.tags.clone(),
@@ -293,8 +342,29 @@ pub fn pack(dir: &Path, origin: &Origin, version: &str, out: &Path) -> Result<Mo
     Ok(j)
 }
 
-/// The checks on a mod.json and its package's bytes.
-pub fn verify(j: &ModJson, bw_bytes: &[u8], tmp: &Path) -> Result<(), String> {
+/// The checks on a mod.json, its package's bytes and, for a file icon, the
+/// icon's bytes.
+pub fn verify(j: &ModJson, bw_bytes: &[u8], icon: Option<&[u8]>, tmp: &Path) -> Result<(), String> {
+    match &j.icon {
+        None => {}
+        Some(IconRef::Item(n)) => {
+            if !(1..eidos_mod::manifest::ICON_ITEMS).contains(n) {
+                return Err(format!("icon item {n} is not an item with an icon"));
+            }
+        }
+        Some(IconRef::Species(n)) => {
+            if !(1..=eidos_mod::manifest::ICON_SPECIES_MAX).contains(n) {
+                return Err(format!("icon species {n} is not a species"));
+            }
+        }
+        Some(IconRef::File(f)) => {
+            if f != ICON_FILE {
+                return Err(format!("the icon file is {f} (it must be {ICON_FILE})"));
+            }
+            let bytes = icon.ok_or("mod.json names icon.png, but there is none")?;
+            eidos_mod::manifest::check_icon_png(bytes)?;
+        }
+    }
     if j.format != FORMAT {
         return Err(format!(
             "mod.json format {} (this check knows {FORMAT})",
@@ -494,7 +564,8 @@ pub fn check(index_path: &Path) -> Result<usize, String> {
                     let out = tmp.join(id);
                     let j = pack(&m, &Origin::Official(id.clone()), &v, &out)?;
                     let bw = fs::read(out.join(PACKAGE)).map_err(|e| e.to_string())?;
-                    verify(&j, &bw, &tmp)?;
+                    let icon = fs::read(out.join(ICON_FILE)).ok();
+                    verify(&j, &bw, icon.as_deref(), &tmp)?;
                     return Ok((j, " [official, not released yet]"));
                 }
             }
@@ -504,7 +575,14 @@ pub fn check(index_path: &Path) -> Result<usize, String> {
                 return Err(format!("its mod.json is another mod's ({})", j.id));
             }
             let bw = fetch(&release_url(e, PACKAGE), eidos_mod::package::MAX_TOTAL)?;
-            verify(&j, &bw, &tmp)?;
+            let icon = match &j.icon {
+                Some(IconRef::File(_)) => Some(fetch(
+                    &release_url(e, ICON_FILE),
+                    eidos_mod::manifest::ICON_FILE_BYTES,
+                )?),
+                _ => None,
+            };
+            verify(&j, &bw, icon.as_deref(), &tmp)?;
             Ok((
                 j,
                 if e.official.is_some() {
@@ -583,12 +661,12 @@ mod tests {
             serde_json::from_str(&fs::read_to_string(out.join("mod.json")).unwrap()).unwrap();
         assert_eq!(back, j);
         let bw = fs::read(out.join("mod.bw")).unwrap();
-        verify(&back, &bw, t.path()).unwrap();
+        verify(&back, &bw, None, t.path()).unwrap();
         // a changed byte is caught
         let mut bad = bw.clone();
         let n = bad.len() / 2;
         bad[n] ^= 0xFF;
-        assert!(verify(&back, &bad, t.path()).is_err());
+        assert!(verify(&back, &bad, None, t.path()).is_err());
         // packing twice gives the same bytes
         let out2 = t.path().join("dist2");
         let j2 = pack(&m, &repo("someone/sample"), "1.2.0", &out2).unwrap();
@@ -608,15 +686,54 @@ mod tests {
         assert!(j.official);
         assert_eq!(j.multiplayer, Some(1));
         let bw = fs::read(out.join("mod.bw")).unwrap();
-        verify(&j, &bw, t.path()).unwrap();
+        verify(&j, &bw, None, t.path()).unwrap();
         // an external mod cannot claim to be official
         let mut fake = j.clone();
         fake.repo = "someone/x".into();
-        assert!(verify(&fake, &bw, t.path()).is_err());
+        assert!(verify(&fake, &bw, None, t.path()).is_err());
         let mut fake2 = j.clone();
         fake2.path = "mods/other".into();
-        assert!(verify(&fake2, &bw, t.path()).is_err());
+        assert!(verify(&fake2, &bw, None, t.path()).is_err());
         assert!(pack(&m, &Origin::Official("Bad_Id".into()), "1.0.0", &out).is_err());
+    }
+
+    #[test]
+    fn icons() {
+        let t = tempfile::tempdir().unwrap();
+        let m = t.path().join("mod");
+        sample(&m, "version = 1.0.0\nicon = item 280\n");
+        let j = pack(&m, &repo("a/b"), "1.0.0", &t.path().join("o")).unwrap();
+        assert_eq!(j.icon, Some(IconRef::Item(280)));
+        assert_eq!(
+            serde_json::to_value(&j).unwrap()["icon"],
+            serde_json::json!({"item": 280})
+        );
+        let bw = fs::read(t.path().join("o/mod.bw")).unwrap();
+        verify(&j, &bw, None, t.path()).unwrap();
+        // a file icon is copied beside mod.json and checked
+        let f = t.path().join("f");
+        sample(&f, "version = 1.0.0\nicon = art/knot.png\n");
+        let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
+        png.extend(64u32.to_be_bytes());
+        png.extend(64u32.to_be_bytes());
+        fs::create_dir_all(f.join("art")).unwrap();
+        fs::write(f.join("art/knot.png"), &png).unwrap();
+        let out = t.path().join("of");
+        let j = pack(&f, &repo("a/b"), "1.0.0", &out).unwrap();
+        assert_eq!(j.icon, Some(IconRef::File("icon.png".into())));
+        assert_eq!(fs::read(out.join("icon.png")).unwrap(), png);
+        let bw = fs::read(out.join("mod.bw")).unwrap();
+        verify(&j, &bw, Some(&png), t.path()).unwrap();
+        assert!(verify(&j, &bw, None, t.path()).is_err());
+        assert!(verify(&j, &bw, Some(b"GIF89a"), t.path()).is_err());
+        // a bad or oversized icon stops the pack
+        let bad = t.path().join("bad");
+        sample(&bad, "version = 1.0.0\nicon = item 9999\n");
+        assert!(pack(&bad, &repo("a/b"), "1.0.0", &t.path().join("ob")).is_err());
+        png[23] = 0;
+        png[22] = 1; // 64 wide, 256 + 0 high: not square
+        fs::write(f.join("art/knot.png"), &png).unwrap();
+        assert!(pack(&f, &repo("a/b"), "1.0.0", &t.path().join("oc")).is_err());
     }
 
     #[test]

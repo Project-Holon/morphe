@@ -351,6 +351,53 @@ fn settings_carry_the_index_keys() {
 }
 
 #[test]
+fn settings_icon() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("knot");
+    Folder::create(&root, "Knot", None).unwrap();
+    fs::write(root.join(MANIFEST), "name = Knot\nicon = item 280\n").unwrap();
+    let s = read_settings(&root).unwrap();
+    assert_eq!(s.icon.as_deref(), Some("item 280"));
+    assert!(check_settings(&s, 0).is_empty());
+    assert!(check_icon_file(&root, &s).is_empty());
+    // a bad value is flagged and kept as written
+    let mut t = s.clone();
+    t.icon = Some("item 9999".into());
+    assert!(check_settings(&t, 0)
+        .iter()
+        .any(|d| d.field.as_deref() == Some("icon")));
+    write_settings(&root, &t).unwrap();
+    assert_eq!(
+        read_settings(&root).unwrap().icon.as_deref(),
+        Some("item 9999")
+    );
+    // a file: missing, then a 300x300 PNG, then a good one
+    t.icon = Some("icon.png".into());
+    assert_eq!(check_icon_file(&root, &t).len(), 1);
+    let png = |side: u32| {
+        let mut b = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
+        b.extend(side.to_be_bytes());
+        b.extend(side.to_be_bytes());
+        b
+    };
+    fs::write(root.join("icon.png"), png(300)).unwrap();
+    assert_eq!(check_icon_file(&root, &t).len(), 1);
+    fs::write(root.join("icon.png"), png(64)).unwrap();
+    assert!(check_icon_file(&root, &t).is_empty());
+    write_settings(&root, &t).unwrap();
+    let text = fs::read_to_string(root.join(MANIFEST)).unwrap();
+    assert!(
+        text.contains("icon = icon.png\n") && !text.contains("9999"),
+        "{text}"
+    );
+    t.icon = None;
+    write_settings(&root, &t).unwrap();
+    assert!(!fs::read_to_string(root.join(MANIFEST))
+        .unwrap()
+        .contains("icon"));
+}
+
+#[test]
 fn settings_checks() {
     let mut s = ModSettings {
         name: "m".into(),

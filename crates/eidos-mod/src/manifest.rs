@@ -42,6 +42,9 @@ pub struct Manifest {
     /// Words that sort the mod in the mod index (`tags = hard, rules`):
     /// lowercased, without commas or empty ones. The port ignores the key.
     pub tags: Vec<String>,
+    /// The mod's picture in the launcher and the mod index. A value that
+    /// does not read stays in `other`, untouched.
+    pub icon: Option<Icon>,
     /// The lines the editor does not edit, kept in order.
     #[serde(skip)]
     pub other: Vec<String>,
@@ -58,6 +61,7 @@ impl Manifest {
             version: String::new(),
             game: String::new(),
             tags: Vec::new(),
+            icon: None,
             other: Vec::new(),
         };
         for line in text.lines() {
@@ -83,6 +87,10 @@ impl Manifest {
                 "version" => m.version = value.to_string(),
                 "game" => m.game = value.to_string(),
                 "tags" => m.tags = clean_tags(value.split(',')),
+                "icon" => match Icon::parse(value) {
+                    Ok(icon) => m.icon = Some(icon),
+                    Err(_) => m.other.push(line.to_string()),
+                },
                 _ => m.other.push(line.to_string()),
             }
         }
@@ -116,6 +124,9 @@ impl Manifest {
                 out.push_str(&format!("{key} = {value}\n"));
             }
         }
+        if let Some(icon) = &self.icon {
+            out.push_str(&format!("icon = {icon}\n"));
+        }
         let tags = clean_tags(self.tags.iter().map(|t| clean(t)));
         if !tags.is_empty() {
             out.push_str(&format!("tags = {}\n", tags.join(", ")));
@@ -128,6 +139,99 @@ impl Manifest {
         }
         out
     }
+}
+
+/// The largest species number an icon may name (Black and White's 649).
+pub const ICON_SPECIES_MAX: u16 = 649;
+/// The item numbers an icon may name: the ones the game's icon table holds.
+pub const ICON_ITEMS: u16 = 627;
+/// An icon file's limits: a square PNG of at most this many pixels a side
+/// and this many bytes.
+pub const ICON_FILE_SIDE: u32 = 256;
+pub const ICON_FILE_BYTES: u64 = 64 * 1024;
+
+/// A mod's picture: an item's bag icon or a species sprite from the
+/// player's ROM, or a PNG in the mod folder.
+///
+/// ```text
+/// icon = item 280        Destiny Knot
+/// icon = species 25      Pikachu
+/// icon = icon.png        a file in the mod folder
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Icon {
+    Item(u16),
+    Species(u16),
+    File(String),
+}
+
+impl Icon {
+    pub fn parse(text: &str) -> Result<Icon, String> {
+        let text = text.trim();
+        let number = |kind: &str, v: &str, max: u16| -> Result<u16, String> {
+            v.trim()
+                .parse::<u16>()
+                .ok()
+                .filter(|n| (1..=max).contains(n))
+                .ok_or_else(|| format!("{kind} {} is not a number from 1 to {max}", v.trim()))
+        };
+        if let Some(v) = text.strip_prefix("item ") {
+            return number("item", v, ICON_ITEMS - 1).map(Icon::Item);
+        }
+        if let Some(v) = text.strip_prefix("species ") {
+            return number("species", v, ICON_SPECIES_MAX).map(Icon::Species);
+        }
+        let path = text.replace('\\', "/");
+        if path.is_empty() {
+            return Err("an icon is `item <n>`, `species <n>` or a .png file".into());
+        }
+        if !path.to_ascii_lowercase().ends_with(".png") {
+            return Err(format!("{text}: an icon file is a .png"));
+        }
+        if path.starts_with('/')
+            || path.contains(':')
+            || path.split('/').any(|p| p == ".." || p.is_empty())
+        {
+            return Err(format!(
+                "{text}: an icon file is a path inside the mod folder"
+            ));
+        }
+        Ok(Icon::File(path))
+    }
+}
+
+impl std::fmt::Display for Icon {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Icon::Item(n) => write!(f, "item {n}"),
+            Icon::Species(n) => write!(f, "species {n}"),
+            Icon::File(p) => write!(f, "{p}"),
+        }
+    }
+}
+
+/// Checks an icon file's bytes against the limits: a PNG, square, at most
+/// 256x256, at most 64 KiB. Returns its side.
+pub fn check_icon_png(bytes: &[u8]) -> Result<u32, String> {
+    if bytes.len() as u64 > ICON_FILE_BYTES {
+        return Err(format!(
+            "the icon is {} bytes; at most {ICON_FILE_BYTES}",
+            bytes.len()
+        ));
+    }
+    // signature, then the IHDR chunk: length, "IHDR", width, height
+    if bytes.len() < 24 || &bytes[..8] != b"\x89PNG\r\n\x1a\n" || &bytes[12..16] != b"IHDR" {
+        return Err("the icon is not a PNG file".into());
+    }
+    let w = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
+    let h = u32::from_be_bytes(bytes[20..24].try_into().unwrap());
+    if w != h || w == 0 || w > ICON_FILE_SIDE {
+        return Err(format!(
+            "the icon is {w}x{h}; it must be square, at most {ICON_FILE_SIDE}x{ICON_FILE_SIDE}"
+        ));
+    }
+    Ok(w)
 }
 
 /// Tags as the manifest keeps them: trimmed, lowercased, no commas, no
@@ -267,6 +371,43 @@ mod tests {
         assert_eq!(back.version, "0.2.0");
         assert_eq!(back.game, "IRAF");
         assert!(!Manifest::parse("name = B", "d").write().contains("game"));
+    }
+
+    #[test]
+    fn icons() {
+        assert_eq!(Icon::parse("item 280"), Ok(Icon::Item(280)));
+        assert_eq!(Icon::parse(" species 25 "), Ok(Icon::Species(25)));
+        assert_eq!(
+            Icon::parse("art\\icon.PNG"),
+            Ok(Icon::File("art/icon.PNG".into()))
+        );
+        for bad in [
+            "item 0",
+            "item 700",
+            "species 650",
+            "species x",
+            "icon.gif",
+            "../x.png",
+            "/x.png",
+            "C:/x.png",
+            "",
+        ] {
+            assert!(Icon::parse(bad).is_err(), "{bad}");
+        }
+        let m = Manifest::parse("name = A\nicon = item 216\n", "d");
+        assert_eq!(m.icon, Some(Icon::Item(216)));
+        assert!(m.write().contains("icon = item 216\n"));
+        // a value that does not read is kept as written
+        let bad = Manifest::parse("name = A\nicon = item 9999\n", "d");
+        assert_eq!(bad.icon, None);
+        assert!(bad.write().contains("icon = item 9999\n"));
+        let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
+        png.extend(64u32.to_be_bytes());
+        png.extend(64u32.to_be_bytes());
+        assert_eq!(check_icon_png(&png), Ok(64));
+        png[23] = 32;
+        assert!(check_icon_png(&png).is_err());
+        assert!(check_icon_png(b"GIF89a").is_err());
     }
 
     #[test]

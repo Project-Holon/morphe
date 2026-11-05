@@ -9,6 +9,7 @@
 pub mod badges;
 pub mod blz;
 pub mod image;
+pub mod item;
 pub mod lz;
 pub mod msg;
 pub mod narc;

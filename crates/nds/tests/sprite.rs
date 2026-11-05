@@ -73,3 +73,46 @@ fn badge_case() {
         }
     }
 }
+
+/// Item icons from every cartridge in `NDS_ROMS` (any file name): the
+/// official mods' picks, 32x32 and drawn. With `NDS_ITEMS_OUT`, as PNG.
+#[test]
+fn item_icons() {
+    let Some(dir) = std::env::var_os("NDS_ROMS").map(std::path::PathBuf::from) else {
+        return;
+    };
+    for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+        let path = entry.path();
+        if path.extension().is_none_or(|x| x != "nds") {
+            continue;
+        }
+        let rom = Rom::open(&path).unwrap();
+        for item in [1u16, 216, 247, 280] {
+            let img = nds::item::item_icon(&rom, item).unwrap();
+            assert_eq!(
+                (img.width, img.height),
+                (32, 32),
+                "{} {item}",
+                path.display()
+            );
+            assert!(
+                img.pixels.chunks(4).any(|p| p[3] > 0),
+                "{}: item {item}",
+                path.display()
+            );
+            if let Some(out) = std::env::var_os("NDS_ITEMS_OUT") {
+                let stem = path
+                    .file_stem()
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace(' ', "_");
+                std::fs::write(
+                    std::path::PathBuf::from(out).join(format!("{stem}_{item}.png")),
+                    nds::image::encode_png(&img),
+                )
+                .unwrap();
+            }
+        }
+        assert!(nds::item::item_icon(&rom, nds::item::ITEMS).is_err());
+    }
+}

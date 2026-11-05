@@ -1728,6 +1728,9 @@ pub struct ModSettings {
     pub version: String,
     /// Words that sort the mod in the mod index.
     pub tags: Vec<String>,
+    /// The `icon` value as written: `item <n>`, `species <n>` or a .png
+    /// path in the mod folder.
+    pub icon: Option<String>,
     /// Only a mod with code states one.
     pub api: Option<u32>,
     pub port: Option<String>,
@@ -1780,6 +1783,11 @@ pub fn read_settings(root: &Path) -> io::Result<ModSettings> {
         author: m.author.clone(),
         version: m.version.clone(),
         tags: m.tags.clone(),
+        icon: m
+            .icon
+            .as_ref()
+            .map(|i| i.to_string())
+            .or_else(|| last("icon")),
         api: m.api,
         port: last("port"),
         code: last("code"),
@@ -1836,6 +1844,27 @@ fn namespace_valid(ns: &str) -> bool {
     !(RESERVED.contains(&stem.as_str()) || numbered("COM") || numbered("LPT"))
 }
 
+/// The checks an icon file needs the mod folder for: it is there, and it
+/// is a square PNG within the limits (`manifest::check_icon_png`).
+pub fn check_icon_file(root: &Path, s: &ModSettings) -> Vec<Diagnostic> {
+    let Some(Ok(crate::manifest::Icon::File(path))) = s
+        .icon
+        .as_deref()
+        .filter(|v| !v.trim().is_empty())
+        .map(crate::manifest::Icon::parse)
+    else {
+        return Vec::new();
+    };
+    let msg = match std::fs::read(root.join(&path)) {
+        Err(_) => format!("{path} is not in the mod folder"),
+        Ok(bytes) => match crate::manifest::check_icon_png(&bytes) {
+            Ok(_) => return Vec::new(),
+            Err(e) => e,
+        },
+    };
+    vec![Diagnostic::field("icon", Severity::Warning, &msg)]
+}
+
 /// Whether `v` is three whole numbers joined by dots (`1.0.0`), the form the
 /// mod index tags releases with.
 pub fn is_release_version(v: &str) -> bool {
@@ -1864,6 +1893,11 @@ pub fn check_settings(s: &ModSettings, overrides: usize) -> Vec<Diagnostic> {
             Error,
             "the load order is between -1000000 and 1000000",
         ));
+    }
+    if let Some(text) = s.icon.as_deref().filter(|v| !v.trim().is_empty()) {
+        if let Err(msg) = crate::manifest::Icon::parse(text) {
+            out.push(Diagnostic::field("icon", Warning, &msg));
+        }
     }
     // The game ignores the version; the mod index tags releases with it.
     let version = s.version.trim();
@@ -2054,6 +2088,15 @@ pub fn write_settings(root: &Path, s: &ModSettings) -> io::Result<()> {
     m.author = s.author.trim().to_string();
     m.version = s.version.trim().to_string();
     m.tags = crate::manifest::clean_tags(&s.tags);
+    // An icon that does not read is kept as written, as the parser keeps it.
+    drop_keys(m, &["icon"]);
+    m.icon = None;
+    if let Some(text) = s.icon.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        match crate::manifest::Icon::parse(text) {
+            Ok(icon) => m.icon = Some(icon),
+            Err(_) => m.other.push(format!("icon = {text}")),
+        }
+    }
     let code = s.code.as_deref().map(str::trim).filter(|c| !c.is_empty());
     m.api = if code.is_some() { s.api } else { None };
     drop_keys(m, &["port", "code", "state", "settings", "multiplayer"]);

@@ -4,7 +4,7 @@
 //!   katalogos pack <mod-dir> --official <id> --version <x.y.z> [--out <dir>]
 //!   katalogos check <index.json>
 //!   katalogos pending <index.json>
-//!   katalogos inspect <mod.json> <mod.bw>
+//!   katalogos inspect <mod.json> <mod.bw> [icon.png]
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -48,10 +48,16 @@ fn main() -> ExitCode {
             let j: ModJson = serde_json::from_slice(&fs::read(&args[2]).map_err(|e| e.to_string())?)
                 .map_err(|e| format!("mod.json: {e}"))?;
             let bw = fs::read(&args[3]).map_err(|e| e.to_string())?;
+            // the icon: the third file named, else icon.png beside mod.json
+            let icon_path = args.get(4).map(PathBuf::from).unwrap_or_else(|| {
+                Path::new(&args[2])
+                    .with_file_name(katalogos::ICON_FILE)
+            });
+            let icon = fs::read(icon_path).ok();
             let tmp = std::env::temp_dir();
-            verify(&j, &bw, &tmp).map(|_| println!("ok {} {}", j.name, j.version))
+            verify(&j, &bw, icon.as_deref(), &tmp).map(|_| println!("ok {} {}", j.name, j.version))
         })(),
-        _ => Err("usage: katalogos pack <mod-dir> (--repo owner/name | --official <id>) --version x.y.z [--out dir]\n       katalogos check <index.json>\n       katalogos pending <index.json>\n       katalogos inspect <mod.json> <mod.bw>".into()),
+        _ => Err("usage: katalogos pack <mod-dir> (--repo owner/name | --official <id>) --version x.y.z [--out dir]\n       katalogos check <index.json>\n       katalogos pending <index.json>\n       katalogos inspect <mod.json> <mod.bw> [icon.png]".into()),
     };
     match r {
         Ok(()) => ExitCode::SUCCESS,

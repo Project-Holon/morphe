@@ -310,6 +310,47 @@ fn manifest_round_trip() {
 }
 
 #[test]
+fn settings_carry_the_index_keys() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("hard");
+    Folder::create(&root, "Hard", None).unwrap();
+    fs::write(
+        root.join(MANIFEST),
+        "name = Hard\ndescription = Tougher trainers.\nauthor = Someone\nversion = 1.2.0\ntags = Hard, Rules\nrule = battle.faint rules/a.rule\n",
+    )
+    .unwrap();
+    let s = read_settings(&root).unwrap();
+    assert_eq!(s.description, "Tougher trainers.");
+    assert_eq!(s.author, "Someone");
+    assert_eq!(s.version, "1.2.0");
+    assert_eq!(s.tags, vec!["hard", "rules"]);
+    assert!(
+        check_settings(&s, 0).is_empty(),
+        "{:?}",
+        check_settings(&s, 0)
+    );
+    let mut t = s.clone();
+    t.description = " ".into();
+    t.version = "1.2".into();
+    t.tags = vec!["Nuzlocke".into()];
+    let found = check_settings(&t, 0);
+    assert!(
+        found.iter().any(|d| d.field.as_deref() == Some("version")),
+        "{found:?}"
+    );
+    write_settings(&root, &t).unwrap();
+    let back = read_settings(&root).unwrap();
+    assert_eq!(
+        (back.description.as_str(), back.version.as_str()),
+        ("", "1.2")
+    );
+    assert_eq!(back.tags, vec!["nuzlocke"]);
+    let text = fs::read_to_string(root.join(MANIFEST)).unwrap();
+    assert!(text.contains("rule = battle.faint rules/a.rule"), "{text}");
+    assert!(!text.contains("description"), "{text}");
+}
+
+#[test]
 fn settings_checks() {
     let mut s = ModSettings {
         name: "m".into(),

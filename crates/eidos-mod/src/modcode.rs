@@ -1721,6 +1721,13 @@ pub fn check_overrides(text: &str, declared: Option<&DeclaredSet>) -> HooksCheck
 pub struct ModSettings {
     pub name: String,
     pub order: i32,
+    /// What players read about the mod (the mod index shows it).
+    pub description: String,
+    pub author: String,
+    /// `x.y.z`; the mod index tags its releases with it.
+    pub version: String,
+    /// Words that sort the mod in the mod index.
+    pub tags: Vec<String>,
     /// Only a mod with code states one.
     pub api: Option<u32>,
     pub port: Option<String>,
@@ -1769,6 +1776,10 @@ pub fn read_settings(root: &Path) -> io::Result<ModSettings> {
     Ok(ModSettings {
         name: m.name.clone(),
         order: m.order,
+        description: m.description.clone(),
+        author: m.author.clone(),
+        version: m.version.clone(),
+        tags: m.tags.clone(),
         api: m.api,
         port: last("port"),
         code: last("code"),
@@ -1825,6 +1836,16 @@ fn namespace_valid(ns: &str) -> bool {
     !(RESERVED.contains(&stem.as_str()) || numbered("COM") || numbered("LPT"))
 }
 
+/// Whether `v` is three whole numbers joined by dots (`1.0.0`), the form the
+/// mod index tags releases with.
+pub fn is_release_version(v: &str) -> bool {
+    let parts: Vec<&str> = v.split('.').collect();
+    parts.len() == 3
+        && parts
+            .iter()
+            .all(|p| !p.is_empty() && p.len() <= 9 && p.bytes().all(|b| b.is_ascii_digit()))
+}
+
 /// Checks the form the way the port reads the manifest. `overrides` is how
 /// many `override` lines the mod has.
 pub fn check_settings(s: &ModSettings, overrides: usize) -> Vec<Diagnostic> {
@@ -1842,6 +1863,15 @@ pub fn check_settings(s: &ModSettings, overrides: usize) -> Vec<Diagnostic> {
             "order",
             Error,
             "the load order is between -1000000 and 1000000",
+        ));
+    }
+    // The game ignores the version; the mod index tags releases with it.
+    let version = s.version.trim();
+    if !version.is_empty() && !is_release_version(version) {
+        out.push(Diagnostic::field(
+            "version",
+            Warning,
+            "the mod index takes a version as three numbers, like 1.0.0",
         ));
     }
     if let Some(text) = s.multiplayer.as_deref().filter(|v| !v.is_empty()) {
@@ -2020,6 +2050,10 @@ pub fn write_settings(root: &Path, s: &ModSettings) -> io::Result<()> {
     let m = &mut project.manifest;
     m.name = s.name.trim().to_string();
     m.order = s.order;
+    m.description = s.description.trim().to_string();
+    m.author = s.author.trim().to_string();
+    m.version = s.version.trim().to_string();
+    m.tags = crate::manifest::clean_tags(&s.tags);
     let code = s.code.as_deref().map(str::trim).filter(|c| !c.is_empty());
     m.api = if code.is_some() { s.api } else { None };
     drop_keys(m, &["port", "code", "state", "settings", "multiplayer"]);

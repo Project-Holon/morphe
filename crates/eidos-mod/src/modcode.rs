@@ -33,11 +33,13 @@ use crate::modopts::SettingsCtx;
 
 /// The newest interface version the port is built against (eidos
 /// `sdk/mod_api.h`, `BW_MOD_API_VERSION`): 4 adds WebAssembly code, 5 adds the
-/// other players' events and the shared table. Version 4 is frozen; 5 is open.
-pub const API_VERSION: u32 = 5;
-/// Every interface version the port accepts: the open 5, the frozen 4 and the
-/// older 3. It refuses a manifest that states another.
-pub const API_VERSIONS: &[u32] = &[3, 4, 5];
+/// other players' events and the shared table, 6 adds content and online mods
+/// (members, text, work variables, badges, field scripts, the type chart, the
+/// world sessions and the Archipelago link) and events such as `move.known`.
+pub const API_VERSION: u32 = 6;
+/// Every interface version the port accepts (`BW_MOD_API_MIN` 3 to
+/// `BW_MOD_API_VERSION`). It refuses a manifest that states another.
+pub const API_VERSIONS: &[u32] = &[3, 4, 5, 6];
 /// The rule-language version the port reads.
 pub const RULE_LANGUAGE: i64 = 1;
 /// The longest namespace the saved-data layer accepts.

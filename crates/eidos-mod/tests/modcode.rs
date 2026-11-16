@@ -18,8 +18,8 @@ fn errors(text: &str, ev: Option<&str>) -> Vec<String> {
 #[test]
 fn tables_have_the_ports_counts() {
     let n = rule_names();
-    assert_eq!(n.events.len(), 65);
-    assert_eq!(n.states.len(), 62);
+    assert_eq!(n.events.len(), 78);
+    assert_eq!(n.states.len(), 65);
     let wild = n.event("encounter.wild").unwrap();
     assert!(wild.fields.iter().any(|f| f.name == "double"));
     assert!(n.event("battle.faint").unwrap().fields.len() == 6);
@@ -43,6 +43,31 @@ fn tables_have_the_ports_counts() {
     assert!(field("battle.ai", "scores").signed);
     assert!(field("battle.stat", "delta").signed);
     assert!(!field("battle.turn", "weather").writable);
+    // interface 6: move.known writes only its answer
+    for name in ["slot", "site", "species", "move"] {
+        assert!(!field("move.known", name).writable, "move.known.{name}");
+    }
+    assert!(field("move.known", "known").writable);
+    assert!(field("mon.shiny", "threshold").writable);
+}
+
+#[test]
+fn interface_6_rules() {
+    // Every Pokemon that can act "knows" Surf: the game's own search then
+    // picks the first one, so it uses the move and shows in the cut-in.
+    let text = "language 1\nrule surf_free on move.known\n    when event.move == 57\n    do set event.known 1\n";
+    assert!(
+        errors(text, Some("move.known")).is_empty(),
+        "{:?}",
+        errors(text, Some("move.known"))
+    );
+    // its other fields are read-only, and it cannot be refused
+    for text in [
+        "language 1\nrule r on move.known\n    do set event.move 15\n",
+        "language 1\nrule r on move.known\n    do refuse\n",
+    ] {
+        assert!(!errors(text, Some("move.known")).is_empty(), "{text}");
+    }
 }
 
 #[test]

@@ -1,0 +1,9 @@
+[package]
+name = "xdelta"
+description = "Apply xdelta3 (VCDIFF, RFC 3284) patches, with the per-window Adler-32 check."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]

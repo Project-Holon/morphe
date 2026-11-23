@@ -7,6 +7,7 @@
 //! no game data.
 
 pub mod badges;
+pub mod banner;
 pub mod blz;
 pub mod image;
 pub mod item;
@@ -20,5 +21,6 @@ pub mod nitro;
 pub mod nscr;
 pub mod place;
 pub mod rom;
+pub mod romdiff;
 pub mod save;
 pub mod sprite;

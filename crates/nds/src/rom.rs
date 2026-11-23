@@ -384,6 +384,54 @@ impl Rom {
     pub fn paths(&self) -> impl Iterator<Item = &str> {
         self.paths.keys().map(String::as_str)
     }
+
+    /// The cartridge header: 0x1000 bytes (the DSi part included), fewer
+    /// for a smaller image.
+    pub fn header(&self) -> Result<Vec<u8>, Error> {
+        let n = self.storage.len().min(0x1000) as usize;
+        Ok(self.storage.read_at(0, n)?)
+    }
+
+    fn header_word(&self, at: u64) -> Result<u32, Error> {
+        let b = self.storage.read_at(at, 4)?;
+        Ok(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+    }
+
+    /// Where the ARM9 binary is loaded.
+    pub fn arm9_address(&self) -> Result<u32, Error> {
+        self.header_word(0x28)
+    }
+
+    /// The ARM7 binary as stored, and its load address.
+    pub fn arm7(&self) -> Result<(u32, Vec<u8>), Error> {
+        let (offset, address, size) = (
+            self.header_word(0x30)?,
+            self.header_word(0x38)?,
+            self.header_word(0x3C)?,
+        );
+        if offset as u64 + size as u64 > self.storage.len() {
+            return Err(Error::Bad("the ARM7 binary lies outside the image"));
+        }
+        Ok((address, self.storage.read_at(offset as u64, size as usize)?))
+    }
+
+    /// The icon and title banner (its size follows its version: 0x840 for
+    /// version 1, up to 0x23C0 for the DSi one).
+    pub fn banner(&self) -> Result<Vec<u8>, Error> {
+        let offset = self.header_word(0x68)? as u64;
+        if offset == 0 || offset + 2 > self.storage.len() {
+            return Ok(Vec::new());
+        }
+        let v = self.storage.read_at(offset, 2)?;
+        let size = match u16::from_le_bytes([v[0], v[1]]) {
+            0x0002 => 0x940,
+            0x0003 => 0xA40,
+            0x0103 => 0x23C0,
+            _ => 0x840,
+        };
+        let size = size.min((self.storage.len() - offset) as usize);
+        Ok(self.storage.read_at(offset, size)?)
+    }
 }
 
 /// The header checksum: CRC-16 (MODBUS form, initial 0xFFFF).

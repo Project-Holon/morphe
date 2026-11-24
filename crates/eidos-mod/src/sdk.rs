@@ -1,9 +1,9 @@
 //! The code-mod SDK as eidos publishes it: the header, the contract file and
-//! the starting sources (`modsdk/v6/`), the header reader that feeds
+//! the starting sources (`modsdk/v7/`), the header reader that feeds
 //! completion, and the check of a built WebAssembly module against the
 //! contract. No compiler is needed for any of it.
 //!
-//! The header is eidos's published `sdk/api/v6/eidos_wasm.h`, copied
+//! The header is eidos's published `sdk/api/v7/eidos_wasm.h`, copied
 //! unchanged; when eidos changes the API, replace it and nothing else here
 //! changes.
 
@@ -13,10 +13,10 @@ use std::path::Path;
 use serde::Serialize;
 
 pub const HEADER_NAME: &str = "eidos_wasm.h";
-pub const HEADER: &str = include_str!("modsdk/v6/eidos_wasm.h");
-pub const TEMPLATE_MOD: &str = include_str!("modsdk/v6/mod.c");
-pub const TEMPLATE_ALLOC: &str = include_str!("modsdk/v6/alloc.c");
-pub const CONTRACT: &str = include_str!("modsdk/v6/contract.txt");
+pub const HEADER: &str = include_str!("modsdk/v7/eidos_wasm.h");
+pub const TEMPLATE_MOD: &str = include_str!("modsdk/v7/mod.c");
+pub const TEMPLATE_ALLOC: &str = include_str!("modsdk/v7/alloc.c");
+pub const CONTRACT: &str = include_str!("modsdk/v7/contract.txt");
 
 /// Where the sources live in a mod folder.
 pub const SRC_DIR: &str = "src";
@@ -26,7 +26,7 @@ pub const INCLUDE_DIR: &str = "include";
 // The contract
 // ---------------------------------------------------------------------
 
-/// `modsdk/v6/contract.txt`, read.
+/// `modsdk/v7/contract.txt`, read.
 #[derive(Debug, Clone, Default)]
 pub struct Contract {
     pub api: u32,

@@ -35,11 +35,13 @@ use crate::modopts::SettingsCtx;
 /// `sdk/mod_api.h`, `BW_MOD_API_VERSION`): 4 adds WebAssembly code, 5 adds the
 /// other players' events and the shared table, 6 adds content and online mods
 /// (members, text, work variables, badges, field scripts, the type chart, the
-/// world sessions and the Archipelago link) and events such as `move.known`.
-pub const API_VERSION: u32 = 6;
+/// world sessions and the Archipelago link) and events such as `move.known`,
+/// 7 adds the National Pokedex and Wonder Cards (`national_dex`,
+/// `mystery_card_add`, the rule action `gift`).
+pub const API_VERSION: u32 = 7;
 /// Every interface version the port accepts (`BW_MOD_API_MIN` 3 to
 /// `BW_MOD_API_VERSION`). It refuses a manifest that states another.
-pub const API_VERSIONS: &[u32] = &[3, 4, 5, 6];
+pub const API_VERSIONS: &[u32] = &[3, 4, 5, 6, 7];
 /// The rule-language version the port reads.
 pub const RULE_LANGUAGE: i64 = 1;
 /// The longest namespace the saved-data layer accepts.
@@ -60,15 +62,17 @@ pub enum Severity {
     Warning,
 }
 
-/// One problem. `line` is 1-based, 0 for a problem with a whole file or with
-/// What a rule is checked against besides the language: the mod's tables and
-/// its options. A `None` part is not checked.
+/// What a rule is checked against besides the language: the mod's tables,
+/// its options and its folder (the files a `gift` action names). A `None`
+/// part is not checked.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct RuleContext<'a> {
     pub tables: Option<&'a TableSet>,
     pub settings: Option<&'a SettingsCtx>,
+    pub root: Option<&'a Path>,
 }
 
+/// One problem. `line` is 1-based, 0 for a problem with a whole file or with
 /// a form field (then `field` names it). `start` and `end` are 1-based
 /// columns, `end` exclusive.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -863,7 +867,22 @@ impl<'a> Parser<'a> {
                 Ok(())
             }
             "set" | "add" | "sub" => {
+                let at = self.tok.clone();
                 self.target()?;
+                // national_dex (interface 7): the game has no call that
+                // turns the National mode off, so the port writes 1 only.
+                if at.kind == Tk::Ident && at.text == "national_dex" {
+                    let one = self.tok.kind == Tk::Number && self.tok.text == "1";
+                    if keyword != "set" || !one {
+                        self.warns.push(PErr {
+                            start: at.start,
+                            end: self.tok.end.max(at.end),
+                            msg: "the port only turns the National Pokedex on: \
+                                  `set national_dex 1` is the one write that works"
+                                .to_string(),
+                        });
+                    }
+                }
                 let t = self.expr()?;
                 self.at_end("the action has more than it needs")?;
                 if !t.is_number() {
@@ -915,6 +934,7 @@ impl<'a> Parser<'a> {
                 }
                 Ok(())
             }
+            "gift" => self.gift(),
             _ => Err(PErr {
                 start: 0,
                 end: 0,
@@ -922,6 +942,56 @@ impl<'a> Parser<'a> {
             }),
         }
     }
+
+    /// `gift "<card file>"` (interface 7): a Wonder Card file in the mod's
+    /// folder. The port reads and checks the file when the rule loads, so a
+    /// missing or wrong file is an error here too when the folder is known.
+    fn gift(&mut self) -> PResult<()> {
+        if self.tok.kind != Tk::Str || self.tok.text.is_empty() {
+            return self.fail("'gift' takes the card file's name in quotes");
+        }
+        let at = self.tok.clone();
+        let bad = |msg: String| PErr {
+            start: at.start,
+            end: at.end,
+            msg,
+        };
+        let name = at.text.as_str();
+        // the port's test, as it is: no "..", no leading slash, no drive
+        if name.contains("..")
+            || name.starts_with('/')
+            || name.starts_with('\\')
+            || name.contains(':')
+        {
+            return Err(bad(format!(
+                "the card file {name} is not inside the mod's folder"
+            )));
+        }
+        if let Some(root) = self.ctx.root {
+            match fs::read(root.join(name)) {
+                Err(_) => return Err(bad(format!("the card file {name} could not be read"))),
+                Ok(bytes) if !wonder_card_ok(&bytes) => {
+                    return Err(bad(format!(
+                        "{name} is not a Wonder Card (a .pgf file of {WONDER_CARD_SIZE} bytes)"
+                    )));
+                }
+                Ok(_) => {}
+            }
+        }
+        self.advance()?;
+        self.at_end("the action has more than it needs")
+    }
+}
+
+/// A Wonder Card (.pgf) is this many bytes (eidos `BW_MYSTERY_CARD_SIZE`).
+pub const WONDER_CARD_SIZE: usize = 0xCC;
+
+/// The port's test of a card file (eidos `bw_mod_v7_mystery_card_ok`): the
+/// size, a gift type of 1 to 3 at 0xB3, and a card id below 2048 at 0xB0.
+pub fn wonder_card_ok(card: &[u8]) -> bool {
+    card.len() == WONDER_CARD_SIZE
+        && (1..=3).contains(&card[0xB3])
+        && u16::from_le_bytes([card[0xB0], card[0xB1]]) < 0x800
 }
 
 /// A line of a rule file without its comment and outer blanks, and where it
@@ -985,7 +1055,7 @@ pub fn check_rule_in(
 ) -> Vec<Diagnostic> {
     let ctx = RuleContext {
         tables,
-        settings: None,
+        ..RuleContext::default()
     };
     check_rule_ctx(text, expected, ctx)
 }
@@ -1928,7 +1998,10 @@ pub fn check_settings(s: &ModSettings, overrides: usize) -> Vec<Diagnostic> {
             out.push(Diagnostic::field(
                 "api",
                 Error,
-                &format!("the port accepts api 3 and 4; it refuses a mod built for {api}"),
+                &format!(
+                    "the port accepts api {} to {API_VERSION}; it refuses a mod built for {api}",
+                    API_VERSIONS[0]
+                ),
             ));
         }
     }
@@ -2272,6 +2345,7 @@ pub fn write_rule(root: &Path, path: &str, text: &str) -> io::Result<Vec<Diagnos
     let ctx = RuleContext {
         tables: Some(&tables),
         settings: Some(&settings),
+        root: Some(root),
     };
     Ok(check_rule_ctx(text, event.as_deref(), ctx))
 }

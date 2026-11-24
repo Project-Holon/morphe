@@ -19,7 +19,7 @@ fn errors(text: &str, ev: Option<&str>) -> Vec<String> {
 fn tables_have_the_ports_counts() {
     let n = rule_names();
     assert_eq!(n.events.len(), 78);
-    assert_eq!(n.states.len(), 65);
+    assert_eq!(n.states.len(), 66);
     let wild = n.event("encounter.wild").unwrap();
     assert!(wild.fields.iter().any(|f| f.name == "double"));
     assert!(n.event("battle.faint").unwrap().fields.len() == 6);
@@ -68,6 +68,86 @@ fn interface_6_rules() {
     ] {
         assert!(!errors(text, Some("move.known")).is_empty(), "{text}");
     }
+}
+
+#[test]
+fn interface_7_rules() {
+    let n = rule_names();
+    let nd = n.states.iter().find(|s| s.name == "national_dex").unwrap();
+    assert!(nd.readable && nd.writable && nd.writable_ok);
+    let by = |text: &str, ctx: RuleContext| -> (Vec<String>, Vec<String>) {
+        let d = check_rule_ctx(text, Some("save.load"), ctx);
+        let pick = |s: Severity| {
+            d.iter()
+                .filter(|x| x.severity == s)
+                .map(|x| x.message.clone())
+                .collect::<Vec<_>>()
+        };
+        (pick(Severity::Error), pick(Severity::Warning))
+    };
+    let rule = |body: &str| format!("language 1\nrule r on save.load\n    do {body}\n");
+
+    // national_dex: 1 is the one write the port makes
+    let (e, w) = by(&rule("set national_dex 1"), RuleContext::default());
+    assert!(e.is_empty() && w.is_empty(), "{e:?} {w:?}");
+    for body in [
+        "set national_dex 0",
+        "add national_dex 1",
+        "set national_dex money",
+    ] {
+        let (e, w) = by(&rule(body), RuleContext::default());
+        assert!(e.is_empty() && w.len() == 1, "{body}: {e:?} {w:?}");
+    }
+    let (e, _) = by(
+        "language 1\nrule r on save.load\n    when national_dex == 0\n    do set national_dex 1\n",
+        RuleContext::default(),
+    );
+    assert!(e.is_empty(), "{e:?}");
+
+    // gift: the name's shape without a folder
+    let (e, _) = by(&rule("gift \"cards/pass.pgf\""), RuleContext::default());
+    assert!(e.is_empty(), "{e:?}");
+    for body in [
+        "gift",
+        "gift 5",
+        "gift \"\"",
+        "gift \"../pass.pgf\"",
+        "gift \"/pass.pgf\"",
+        "gift \"\\\\pass.pgf\"",
+        "gift \"C:pass.pgf\"",
+        "gift \"pass.pgf\" 1",
+    ] {
+        let (e, _) = by(&rule(body), RuleContext::default());
+        assert!(!e.is_empty(), "{body}");
+    }
+
+    // gift with the folder: the file is read and checked as the port does
+    let root = std::env::temp_dir().join(format!("morphe-gift-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(root.join("cards")).unwrap();
+    let mut card = vec![0u8; WONDER_CARD_SIZE];
+    card[0xB0..0xB2].copy_from_slice(&0x7FEu16.to_le_bytes());
+    card[0xB3] = 2;
+    fs::write(root.join("cards/pass.pgf"), &card).unwrap();
+    let mut wrong = card.clone();
+    wrong[0xB3] = 4;
+    fs::write(root.join("cards/wrong.pgf"), &wrong).unwrap();
+    fs::write(root.join("cards/short.pgf"), &card[..100]).unwrap();
+    let ctx = RuleContext {
+        root: Some(&root),
+        ..RuleContext::default()
+    };
+    assert!(wonder_card_ok(&card));
+    let (e, _) = by(&rule("gift \"cards/pass.pgf\""), ctx);
+    assert!(e.is_empty(), "{e:?}");
+    for name in ["cards/none.pgf", "cards/wrong.pgf", "cards/short.pgf"] {
+        let (e, _) = by(&rule(&format!("gift \"{name}\"")), ctx);
+        assert_eq!(e.len(), 1, "{name}");
+    }
+    let mut far = card.clone();
+    far[0xB0..0xB2].copy_from_slice(&0x800u16.to_le_bytes());
+    assert!(!wonder_card_ok(&far));
+    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
@@ -271,6 +351,7 @@ fn actions_state_and_heal_hp() {
             "give" => " do give 1 1".to_string(),
             "box" => " do box 0 3".to_string(),
             "withdraw" => " do withdraw 0 1".to_string(),
+            "gift" => " do gift \"cards/a.pgf\"".to_string(),
             other => panic!("the port has an action kenon does not check: {other}"),
         };
         let text = format!("language 1\nrule r on dex.register\n{body}\n");

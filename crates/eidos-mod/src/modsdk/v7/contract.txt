@@ -1,7 +1,7 @@
-# The wasm contract kenon builds and checks against (api 6).
+# The wasm contract kenon builds and checks against (api 7).
 # One line per entry: key = value. The header is eidos's published
-# sdk/api/v6/eidos_wasm.h, copied unchanged.
-api = 6
+# sdk/api/v7/eidos_wasm.h, copied unchanged.
+api = 7
 target = wasm32-freestanding
 import_module = eidos
 output = mod.wasm

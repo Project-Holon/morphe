@@ -435,7 +435,8 @@ fn manifest_round_trip() {
     ] {
         assert!(text.contains(kept), "{kept} lost:\n{text}");
     }
-    // A change reads back, and api goes with the code.
+    // A change reads back. The api stays without the code: the port checks
+    // it on every mod, and a data mod states 7 to keep older ports out.
     let mut t = s.clone();
     t.name = "Fairy".into();
     t.order = -5;
@@ -445,9 +446,12 @@ fn manifest_round_trip() {
     let back = read_settings(&root).unwrap();
     assert_eq!(
         (back.name.as_str(), back.order, back.api, back.code),
-        ("Fairy", -5, None, None)
+        ("Fairy", -5, Some(3), None)
     );
     assert_eq!(back.port, None);
+    t.api = None;
+    write_settings(&root, &t).unwrap();
+    assert_eq!(read_settings(&root).unwrap().api, None);
     assert_eq!(back.state.as_deref(), Some("fairy"));
     assert!(write_settings(&root, &ModSettings::default()).is_err());
 }
@@ -491,6 +495,48 @@ fn settings_carry_the_index_keys() {
     let text = fs::read_to_string(root.join(MANIFEST)).unwrap();
     assert!(text.contains("rule = battle.faint rules/a.rule"), "{text}");
     assert!(!text.contains("description"), "{text}");
+}
+
+#[test]
+fn settings_game() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("blaze");
+    Folder::create(&root, "Blaze", None).unwrap();
+    fs::write(root.join(MANIFEST), "name = Blaze\ngame = IRBO\napi = 7\n").unwrap();
+    let mut s = read_settings(&root).unwrap();
+    assert_eq!(s.game.as_deref(), Some("IRBO"));
+    assert!(
+        check_settings(&s, 0).is_empty(),
+        "{:?}",
+        check_settings(&s, 0)
+    );
+    s.game = Some("black".into());
+    write_settings(&root, &s).unwrap();
+    let text = fs::read_to_string(root.join(MANIFEST)).unwrap();
+    assert!(
+        text.contains("game = black\n") && text.contains("api = 7\n"),
+        "{text}"
+    );
+    // both games: no line
+    s.game = None;
+    write_settings(&root, &s).unwrap();
+    assert!(!fs::read_to_string(root.join(MANIFEST))
+        .unwrap()
+        .contains("game"));
+    s.game = Some("both".into());
+    let fields: Vec<_> = check_settings(&s, 0)
+        .into_iter()
+        .filter_map(|d| d.field)
+        .collect();
+    assert_eq!(fields, ["game"]);
+    // an api out of range is refused on a mod without code too
+    s.game = None;
+    s.api = Some(2);
+    let fields: Vec<_> = check_settings(&s, 0)
+        .into_iter()
+        .filter_map(|d| d.field)
+        .collect();
+    assert_eq!(fields, ["api"]);
 }
 
 #[test]

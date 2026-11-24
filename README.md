@@ -38,10 +38,10 @@ Apps pin a tag, never a branch.
 
 ```toml
 # Cargo.toml
-eidos-mod = { git = "https://github.com/Project-Holon/morphe", tag = "v0.10.0" }
-nds = { git = "https://github.com/Project-Holon/morphe", tag = "v0.10.0" }
-xdelta = { git = "https://github.com/Project-Holon/morphe", tag = "v0.10.0" }
-releases = { git = "https://github.com/Project-Holon/morphe", tag = "v0.10.0" }
+eidos-mod = { git = "https://github.com/Project-Holon/morphe", tag = "v0.11.0" }
+nds = { git = "https://github.com/Project-Holon/morphe", tag = "v0.11.0" }
+xdelta = { git = "https://github.com/Project-Holon/morphe", tag = "v0.11.0" }
+releases = { git = "https://github.com/Project-Holon/morphe", tag = "v0.11.0" }
 ```
 
 ```json

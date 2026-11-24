@@ -1803,7 +1803,11 @@ pub struct ModSettings {
     /// The `icon` value as written: `item <n>`, `species <n>` or a .png
     /// path in the mod folder.
     pub icon: Option<String>,
-    /// Only a mod with code states one.
+    /// The `game` value as written: `black`, `white`, an older cartridge
+    /// code, or `None` for both (`manifest::game_versions`).
+    pub game: Option<String>,
+    /// A mod with code must state one; a mod without code may (the port
+    /// checks it on every mod).
     pub api: Option<u32>,
     pub port: Option<String>,
     pub code: Option<String>,
@@ -1860,6 +1864,7 @@ pub fn read_settings(root: &Path) -> io::Result<ModSettings> {
             .as_ref()
             .map(|i| i.to_string())
             .or_else(|| last("icon")),
+        game: Some(m.game.trim().to_string()).filter(|g| !g.is_empty()),
         api: m.api,
         port: last("port"),
         code: last("code"),
@@ -1993,8 +1998,13 @@ pub fn check_settings(s: &ModSettings, overrides: usize) -> Vec<Diagnostic> {
             "a mod with code states the api it is built against; the port refuses it otherwise",
         ));
     }
+    if let Some(game) = s.game.as_deref() {
+        if let Err(msg) = crate::manifest::game_versions(game) {
+            out.push(Diagnostic::field("game", Error, &msg));
+        }
+    }
     if let Some(api) = s.api {
-        if code && !API_VERSIONS.contains(&api) {
+        if !API_VERSIONS.contains(&api) {
             out.push(Diagnostic::field(
                 "api",
                 Error,
@@ -2136,9 +2146,7 @@ fn bad_input(msg: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, msg)
 }
 
-/// Writes the form. `api` is kept only for a mod with code, since the port
-/// checks it only then and refuses a wrong one. A line kenon does not own
-/// stays as it is.
+/// Writes the form. A line kenon does not own stays as it is.
 pub fn write_settings(root: &Path, s: &ModSettings) -> io::Result<()> {
     if s.name.trim().is_empty() {
         return Err(bad_input("the mod needs a name"));
@@ -2172,8 +2180,9 @@ pub fn write_settings(root: &Path, s: &ModSettings) -> io::Result<()> {
             Err(_) => m.other.push(format!("icon = {text}")),
         }
     }
+    m.game = s.game.as_deref().unwrap_or("").trim().to_string();
     let code = s.code.as_deref().map(str::trim).filter(|c| !c.is_empty());
-    m.api = if code.is_some() { s.api } else { None };
+    m.api = s.api;
     drop_keys(m, &["port", "code", "state", "settings", "multiplayer"]);
     let opt = |key: &str, v: Option<&str>, other: &mut Vec<String>| {
         if let Some(v) = v.map(str::trim).filter(|v| !v.is_empty()) {

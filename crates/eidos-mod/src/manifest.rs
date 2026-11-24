@@ -20,15 +20,39 @@ pub const KENON_FILE: &str = "kenon.json";
 /// The range the port accepts for `order` (eidos docs/mods.md).
 pub const ORDER_LIMIT: i32 = 1_000_000;
 
+/// The games a mod works on, Black first.
+pub const GAME_VERSIONS: [&str; 2] = ["black", "white"];
+
+/// The games a manifest's `game` value allows: empty is both, `black` or
+/// `white` that one, and a cartridge code (`IRBO`: Black, `IRAF`: White) its
+/// version whatever the language. Anything else is refused.
+pub fn game_versions(value: &str) -> Result<Vec<&'static str>, String> {
+    let v = value.trim();
+    let one = match v {
+        "" => return Ok(GAME_VERSIONS.to_vec()),
+        "black" => "black",
+        "white" => "white",
+        _ if v.len() == 4 && v.is_ascii() && v.starts_with("IRB") => "black",
+        _ if v.len() == 4 && v.is_ascii() && v.starts_with("IRA") => "white",
+        _ => {
+            return Err(format!(
+                "game = {v} is not black, white or a Black or White cartridge code (IRBx, IRAx); leave it out for both"
+            ))
+        }
+    };
+    Ok(vec![one])
+}
+
 /// The keys of `eidos_mod.txt` the editor edits; every other line is kept.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Manifest {
     pub name: String,
     pub order: i32,
-    /// The port refuses a mod whose `api` is not its own interface version
-    /// (eidos sdk/mod_manifest.c), so the editor writes it only when the mod
-    /// already declares one (a mod with code); a data-only mod has none.
+    /// The port refuses a mod, with code or without, whose `api` is outside
+    /// the range it accepts (eidos sdk/mod_manifest.c). A mod with code must
+    /// state one; a mod without code may, so that an older port refuses it
+    /// whole instead of skipping the newer rule names.
     pub api: Option<u32>,
     /// What the mod does, in a sentence or two for players. Empty: none.
     /// The port ignores this key and the three below (it skips keys it does
@@ -36,8 +60,9 @@ pub struct Manifest {
     pub description: String,
     pub author: String,
     pub version: String,
-    /// The game code of the cartridge the mod is made for (`IRAF`: White,
-    /// French). Empty: not said.
+    /// The game the mod works on: `black`, `white`, or empty for both. An
+    /// older manifest names a cartridge code (`IRAF`), read as its version
+    /// with the language aside. [`game_versions`] reads it.
     pub game: String,
     /// Words that sort the mod in the mod index (`tags = hard, rules`):
     /// lowercased, without commas or empty ones. The port ignores the key.
@@ -371,6 +396,18 @@ mod tests {
         assert_eq!(back.version, "0.2.0");
         assert_eq!(back.game, "IRAF");
         assert!(!Manifest::parse("name = B", "d").write().contains("game"));
+    }
+
+    #[test]
+    fn game_lines() {
+        assert_eq!(game_versions(""), Ok(vec!["black", "white"]));
+        assert_eq!(game_versions(" black "), Ok(vec!["black"]));
+        assert_eq!(game_versions("white"), Ok(vec!["white"]));
+        assert_eq!(game_versions("IRBO"), Ok(vec!["black"]));
+        assert_eq!(game_versions("IRAF"), Ok(vec!["white"]));
+        for bad in ["Black", "both", "black, white", "CPUE", "IRB", "IRBOX"] {
+            assert!(game_versions(bad).is_err(), "{bad}");
+        }
     }
 
     #[test]

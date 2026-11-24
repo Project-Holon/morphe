@@ -40,8 +40,6 @@ use sha2::{Digest, Sha256};
 pub const FORMAT: u32 = 1;
 /// The package's file name in a release.
 pub const PACKAGE: &str = "mod.bw";
-/// The cartridge codes a manifest's `game` may name (docs/mod-json.md).
-const GAMES: &[(&str, &str)] = &[("IRB", "black"), ("IRA", "white")];
 /// The index repository: the official mods live in it (mods/<id>).
 pub const INDEX_REPO: &str = "Project-Holon/katalogos";
 /// The id prefix of an official mod.
@@ -207,18 +205,11 @@ pub enum Origin {
     Official(String),
 }
 
-fn games_of(code: &str) -> Result<Vec<String>, String> {
-    if code.is_empty() {
-        return Ok(GAMES.iter().map(|(_, g)| g.to_string()).collect());
-    }
-    for (prefix, g) in GAMES {
-        if code.len() == 4 && code.starts_with(prefix) {
-            return Ok(vec![g.to_string()]);
-        }
-    }
-    Err(format!(
-        "the manifest's game = {code} is not a Black or White cartridge code (IRBx, IRAx)"
-    ))
+/// The games of a manifest's `game` value (docs/mod-json.md).
+fn games_of(value: &str) -> Result<Vec<String>, String> {
+    eidos_mod::manifest::game_versions(value)
+        .map(|g| g.iter().map(|g| g.to_string()).collect())
+        .map_err(|e| format!("the manifest's {e}"))
 }
 
 /// Packs `dir` into `out/mod.bw` and writes `out/mod.json`.
@@ -324,7 +315,11 @@ pub fn pack(dir: &Path, origin: &Origin, version: &str, out: &Path) -> Result<Mo
         multiplayer,
         icon,
         games,
-        game_code: m.game.trim().to_string(),
+        // an older manifest's cartridge code; `black` / `white` is in games
+        game_code: Some(m.game.trim())
+            .filter(|g| g.len() == 4)
+            .unwrap_or("")
+            .to_string(),
         tags: m.tags.clone(),
         api: m.api,
         has_code,
@@ -752,6 +747,11 @@ mod tests {
                 .games,
             vec!["white"]
         );
+        let b = t.path().join("black");
+        sample(&b, "game = black\n");
+        let json = pack(&b, &repo("a/b"), "1.0.0", &t.path().join("o4")).unwrap();
+        assert_eq!(json.games, vec!["black"]);
+        assert_eq!(json.game_code, "");
         let bad = t.path().join("bad");
         sample(&bad, "game = CPUE\n");
         assert!(pack(&bad, &repo("a/b"), "1.0.0", &t.path().join("o3")).is_err());

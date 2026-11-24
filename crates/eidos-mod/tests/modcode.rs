@@ -540,6 +540,43 @@ fn settings_game() {
 }
 
 #[test]
+fn settings_links() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("credit");
+    Folder::create(&root, "Credit", None).unwrap();
+    fs::write(
+        root.join(MANIFEST),
+        "name = Credit\nlink = Thread | https://example.org/t\n",
+    )
+    .unwrap();
+    let mut s = read_settings(&root).unwrap();
+    assert_eq!(s.links, ["Thread | https://example.org/t"]);
+    assert!(check_settings(&s, 0).is_empty());
+    s.links.push("Author on X | https://x.com/someone".into());
+    s.links.push("broken | ftp://x".into());
+    let fields: Vec<_> = check_settings(&s, 0)
+        .into_iter()
+        .filter_map(|d| d.field)
+        .collect();
+    assert_eq!(fields, ["links"]);
+    write_settings(&root, &s).unwrap();
+    let text = fs::read_to_string(root.join(MANIFEST)).unwrap();
+    assert!(
+        text.contains(
+            "link = Thread | https://example.org/t\nlink = Author on X | https://x.com/someone\n"
+        ),
+        "{text}"
+    );
+    assert!(text.contains("link = broken | ftp://x\n"), "{text}");
+    assert_eq!(read_settings(&root).unwrap().links.len(), 3);
+    s.links.clear();
+    write_settings(&root, &s).unwrap();
+    assert!(!fs::read_to_string(root.join(MANIFEST))
+        .unwrap()
+        .contains("link"));
+}
+
+#[test]
 fn settings_icon() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("knot");

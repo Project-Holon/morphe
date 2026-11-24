@@ -70,6 +70,10 @@ pub struct Manifest {
     /// The mod's picture in the launcher and the mod index. A value that
     /// does not read stays in `other`, untouched.
     pub icon: Option<Icon>,
+    /// Pages about the mod or its makers (`link = Text | https://...`), in
+    /// order. The port ignores them; the mod index and the launcher show
+    /// them. A line that does not read stays in `other`.
+    pub links: Vec<Link>,
     /// The lines the editor does not edit, kept in order.
     #[serde(skip)]
     pub other: Vec<String>,
@@ -87,6 +91,7 @@ impl Manifest {
             game: String::new(),
             tags: Vec::new(),
             icon: None,
+            links: Vec::new(),
             other: Vec::new(),
         };
         for line in text.lines() {
@@ -114,6 +119,10 @@ impl Manifest {
                 "tags" => m.tags = clean_tags(value.split(',')),
                 "icon" => match Icon::parse(value) {
                     Ok(icon) => m.icon = Some(icon),
+                    Err(_) => m.other.push(line.to_string()),
+                },
+                "link" => match Link::parse(value) {
+                    Ok(link) => m.links.push(link),
                     Err(_) => m.other.push(line.to_string()),
                 },
                 _ => m.other.push(line.to_string()),
@@ -156,6 +165,9 @@ impl Manifest {
         if !tags.is_empty() {
             out.push_str(&format!("tags = {}\n", tags.join(", ")));
         }
+        for link in &self.links {
+            out.push_str(&format!("link = {link}\n"));
+        }
         for line in &self.other {
             if !line.starts_with("# Written by kenon.") {
                 out.push_str(line);
@@ -163,6 +175,46 @@ impl Manifest {
             }
         }
         out
+    }
+}
+
+/// A page about a mod: `link = Text | https://...`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Link {
+    pub text: String,
+    pub url: String,
+}
+
+impl Link {
+    /// Reads `Text | https://...`: the text before the last `|`, and an
+    /// https address without blanks after it. A `#` cannot appear: it starts
+    /// a comment in the manifest.
+    pub fn parse(value: &str) -> Result<Link, String> {
+        let (text, url) = value
+            .rsplit_once('|')
+            .ok_or_else(|| format!("'{value}' is not Text | https://address"))?;
+        let (text, url) = (text.trim(), url.trim());
+        if text.is_empty() {
+            return Err(format!("the link to {url} has no text before the |"));
+        }
+        if !url.starts_with("https://")
+            || url.len() <= "https://".len()
+            || url.chars().any(|c| c.is_whitespace() || c == '#')
+        {
+            return Err(format!(
+                "{url} is not an https address (https://..., no blanks or #)"
+            ));
+        }
+        Ok(Link {
+            text: text.to_string(),
+            url: url.to_string(),
+        })
+    }
+}
+
+impl std::fmt::Display for Link {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} | {}", self.text, self.url)
     }
 }
 
@@ -396,6 +448,23 @@ mod tests {
         assert_eq!(back.version, "0.2.0");
         assert_eq!(back.game, "IRAF");
         assert!(!Manifest::parse("name = B", "d").write().contains("game"));
+    }
+
+    #[test]
+    fn link_lines() {
+        let m = Manifest::parse(
+            "name = A\nlink = The thread | https://example.org/topic/1-a%C3%A9 \nlink = Me|https://x.com/me\nlink = no url\nlink = | https://x.com\n",
+            "d",
+        );
+        assert_eq!(m.links.len(), 2);
+        assert_eq!(m.links[0].text, "The thread");
+        assert_eq!(m.links[1].url, "https://x.com/me");
+        let text = m.write();
+        assert!(text.contains("link = The thread | https://example.org/topic/1-a%C3%A9\n"));
+        assert!(text.contains("link = no url\n") && text.contains("link = | https://x.com\n"));
+        assert_eq!(Manifest::parse(&text, "d").links, m.links);
+        assert!(Link::parse("A | http://x.com").is_err());
+        assert!(Link::parse("A | https://x .com").is_err());
     }
 
     #[test]

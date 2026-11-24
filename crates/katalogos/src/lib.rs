@@ -79,6 +79,9 @@ pub struct ModJson {
     pub game_code: String,
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Pages about the mod or its makers: the manifest's `link` lines.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub links: Vec<eidos_mod::manifest::Link>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api: Option<u32>,
     pub has_code: bool,
@@ -321,6 +324,7 @@ pub fn pack(dir: &Path, origin: &Origin, version: &str, out: &Path) -> Result<Mo
             .unwrap_or("")
             .to_string(),
         tags: m.tags.clone(),
+        links: m.links.clone(),
         api: m.api,
         has_code,
         rules,
@@ -748,10 +752,15 @@ mod tests {
             vec!["white"]
         );
         let b = t.path().join("black");
-        sample(&b, "game = black\n");
+        sample(
+            &b,
+            "game = black\nlink = Thread | https://example.org/t\nlink = bad | http://x\n",
+        );
         let json = pack(&b, &repo("a/b"), "1.0.0", &t.path().join("o4")).unwrap();
         assert_eq!(json.games, vec!["black"]);
         assert_eq!(json.game_code, "");
+        assert_eq!(json.links.len(), 1);
+        assert_eq!(json.links[0].url, "https://example.org/t");
         let bad = t.path().join("bad");
         sample(&bad, "game = CPUE\n");
         assert!(pack(&bad, &repo("a/b"), "1.0.0", &t.path().join("o3")).is_err());

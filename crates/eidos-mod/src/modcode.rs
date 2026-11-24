@@ -1803,6 +1803,8 @@ pub struct ModSettings {
     /// The `icon` value as written: `item <n>`, `species <n>` or a .png
     /// path in the mod folder.
     pub icon: Option<String>,
+    /// The `link` values as written (`Text | https://...`), in order.
+    pub links: Vec<String>,
     /// The `game` value as written: `black`, `white`, an older cartridge
     /// code, or `None` for both (`manifest::game_versions`).
     pub game: Option<String>,
@@ -1864,6 +1866,14 @@ pub fn read_settings(root: &Path) -> io::Result<ModSettings> {
             .as_ref()
             .map(|i| i.to_string())
             .or_else(|| last("icon")),
+        // the ones that read, then any kept as written; the order of a mix
+        // is not kept, as the parser splits them
+        links: m
+            .links
+            .iter()
+            .map(|l| l.to_string())
+            .chain(other_values(&m, "link"))
+            .collect(),
         game: Some(m.game.trim().to_string()).filter(|g| !g.is_empty()),
         api: m.api,
         port: last("port"),
@@ -1997,6 +2007,11 @@ pub fn check_settings(s: &ModSettings, overrides: usize) -> Vec<Diagnostic> {
             Error,
             "a mod with code states the api it is built against; the port refuses it otherwise",
         ));
+    }
+    for link in &s.links {
+        if let Err(msg) = crate::manifest::Link::parse(link) {
+            out.push(Diagnostic::field("links", Warning, &msg));
+        }
     }
     if let Some(game) = s.game.as_deref() {
         if let Err(msg) = crate::manifest::game_versions(game) {
@@ -2178,6 +2193,15 @@ pub fn write_settings(root: &Path, s: &ModSettings) -> io::Result<()> {
         match crate::manifest::Icon::parse(text) {
             Ok(icon) => m.icon = Some(icon),
             Err(_) => m.other.push(format!("icon = {text}")),
+        }
+    }
+    // A link that does not read is kept as written, as the parser keeps it.
+    drop_keys(m, &["link"]);
+    m.links.clear();
+    for text in s.links.iter().map(|l| l.trim()).filter(|l| !l.is_empty()) {
+        match crate::manifest::Link::parse(text) {
+            Ok(link) => m.links.push(link),
+            Err(_) => m.other.push(format!("link = {text}")),
         }
     }
     m.game = s.game.as_deref().unwrap_or("").trim().to_string();

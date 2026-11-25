@@ -22,6 +22,61 @@ pub const CONTRACT: &str = include_str!("modsdk/v7/contract.txt");
 pub const SRC_DIR: &str = "src";
 pub const INCLUDE_DIR: &str = "include";
 
+// The mod C library (modsdk/v7/libc, see its README.md), embedded by build.rs.
+include!(concat!(env!("OUT_DIR"), "/libc_files.rs"));
+
+/// Where the library's sources go in a mod folder.
+pub const LIBC_DIR: &str = "src/libc";
+
+/// Copies the mod C library into a mod folder: its headers to `include/`,
+/// its sources, licenses and README to `src/libc/`. Returns the paths
+/// written. A mod keeps the copy it has: the call refuses a folder that
+/// already holds `src/libc`, or a header of the same name with other text.
+/// The template's `src/alloc.c` defines memcpy, memset and mod_alloc too,
+/// so it is removed when it is the template's unchanged; a changed one
+/// stops the call (its functions would be defined twice).
+pub fn add_libc(root: &Path) -> std::io::Result<Vec<String>> {
+    let refuse = |msg: String| std::io::Error::new(std::io::ErrorKind::InvalidInput, msg);
+    if root.join(LIBC_DIR).exists() {
+        return Err(refuse(format!(
+            "the mod already has the C library ({LIBC_DIR})"
+        )));
+    }
+    for (dest, text) in LIBC_FILES {
+        let path = root.join(dest);
+        if path.exists() && fs::read_to_string(&path).ok().as_deref() != Some(*text) {
+            return Err(refuse(format!(
+                "{dest} is already in the mod; rename it first"
+            )));
+        }
+    }
+    let alloc = root.join(SRC_DIR).join("alloc.c");
+    let alloc_is_template = match fs::read_to_string(&alloc) {
+        Ok(text) => {
+            if text.replace("\r\n", "\n") != TEMPLATE_ALLOC.replace("\r\n", "\n") {
+                return Err(refuse(
+                    "src/alloc.c was changed: the C library has its own malloc, memcpy and memset. Move your changes out of alloc.c and delete it, then add the library".into(),
+                ));
+            }
+            true
+        }
+        Err(_) => false,
+    };
+    let mut written = Vec::new();
+    for (dest, text) in LIBC_FILES {
+        let path = root.join(dest);
+        if let Some(dir) = path.parent() {
+            fs::create_dir_all(dir)?;
+        }
+        fs::write(&path, text)?;
+        written.push(dest.to_string());
+    }
+    if alloc_is_template {
+        fs::remove_file(&alloc)?;
+    }
+    Ok(written)
+}
+
 // ---------------------------------------------------------------------
 // The contract
 // ---------------------------------------------------------------------

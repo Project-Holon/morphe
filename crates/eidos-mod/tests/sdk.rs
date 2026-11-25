@@ -6,6 +6,38 @@ use std::path::Path;
 use eidos_mod::modcode;
 use eidos_mod::sdk::*;
 
+#[test]
+fn add_the_c_library() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(root.join("src/alloc.c"), TEMPLATE_ALLOC).unwrap();
+    let written = add_libc(root).unwrap();
+    assert!(written.contains(&"include/stdio.h".to_string()));
+    assert!(written.contains(&"include/printf/printf.h".to_string()));
+    assert!(written.contains(&"src/libc/malloc.c".to_string()));
+    assert!(written.contains(&"src/libc/licenses/musl-COPYRIGHT".to_string()));
+    assert!(written.contains(&"src/libc/README.md".to_string()));
+    assert!(root.join("src/libc/tlsf.c").is_file());
+    // the template's allocator goes: the library has its own
+    assert!(!root.join("src/alloc.c").exists());
+    // a mod keeps its copy
+    assert!(add_libc(root).is_err());
+
+    // a changed alloc.c stops the copy, and nothing is written
+    let other = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(other.path().join("src")).unwrap();
+    std::fs::write(other.path().join("src/alloc.c"), "/* mine */\n").unwrap();
+    assert!(add_libc(other.path()).is_err());
+    assert!(!other.path().join("src/libc").exists());
+    // every file names where it came from or is the library's own
+    for (dest, text) in LIBC_FILES {
+        if dest.ends_with(".c") {
+            assert!(!text.is_empty(), "{dest}");
+        }
+    }
+}
+
 // --- handcrafted modules ---
 
 fn leb(mut v: u32) -> Vec<u8> {

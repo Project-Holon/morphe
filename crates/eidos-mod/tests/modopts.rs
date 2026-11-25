@@ -169,6 +169,163 @@ fn the_ports_refusals() {
     assert_eq!(p.options[0].values.len(), 300);
 }
 
+/// The RetroAchievements tab as the user approved it (version 7 lines).
+const RA_TAB: &str = "tab \"RetroAchievements\"
+heading \"Sign in\"
+option ra.user text \"User name\" 20 \"\" word ?ra.who=
+help ra.user \"Your RetroAchievements user name.\"
+option ra.pass secret \"Password\" 64 ?ra.who=
+help ra.pass \"Used once to sign in, never kept.\"
+button ra.signin \"Sign in\" ?ra.who=
+show ra.who \"Signed in as\"
+button ra.signout \"Sign out\" ?ra.who!=
+option ra.hardcore bool \"Hardcore mode\" on
+help ra.hardcore \"Takes effect the next time the game starts.\"
+show ra.why \"Hardcore is off\"
+show ra.queue \"Unlocks\"
+";
+
+#[test]
+fn version_7_lines() {
+    let p = parse_options(RA_TAB);
+    assert!(p.diagnostics.is_empty(), "{:?}", p.diagnostics);
+    assert_eq!(render_options(RA_TAB, &p.options), RA_TAB);
+    let e: Vec<_> = p.options.iter().map(|o| o.entry).collect();
+    assert_eq!(
+        e,
+        [
+            Entry::Tab,
+            Entry::Heading,
+            Entry::Option,
+            Entry::Help,
+            Entry::Option,
+            Entry::Help,
+            Entry::Button,
+            Entry::Show,
+            Entry::Button,
+            Entry::Option,
+            Entry::Help,
+            Entry::Show,
+            Entry::Show
+        ]
+    );
+    let user = &p.options[2];
+    assert_eq!(
+        (user.kind, user.max, user.text.as_str(), user.when.as_str()),
+        (OptionKind::Text, 20, "", "ra.who=")
+    );
+    assert!(user.word);
+    // a quoted "word" is a default, not the flag; `word` without a default
+    let q = parse_options("option a text \"A\" 8 \"word\"\noption b text \"B\" 8 word\n");
+    assert!(q.diagnostics.is_empty(), "{:?}", q.diagnostics);
+    assert_eq!(
+        (q.options[0].text.as_str(), q.options[0].word),
+        ("word", false)
+    );
+    assert_eq!((q.options[1].text.as_str(), q.options[1].word), ("", true));
+    assert!(msgs("option a text \"A\" 8 \"a b\" word")[0].contains("no space"));
+    let pass = &p.options[4];
+    assert_eq!((pass.kind, pass.max), (OptionKind::Secret, 64));
+    assert_eq!(p.options[8].when, "ra.who!=");
+    assert_eq!(p.options[0].label, "RetroAchievements");
+    // only bool, choice and int keys are read by rules
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("ra");
+    Folder::create(&root, "RA", None).unwrap();
+    std::fs::write(root.join("ra.txt"), RA_TAB).unwrap();
+    let m = std::fs::read_to_string(root.join("eidos_mod.txt")).unwrap();
+    std::fs::write(
+        root.join("eidos_mod.txt"),
+        format!("{m}settings = ra.txt\n"),
+    )
+    .unwrap();
+    let ctx = settings_ctx(&root).unwrap();
+    assert_eq!(ctx.keys.iter().collect::<Vec<_>>(), ["ra.hardcore"]);
+    // an edit renders the new lines in their own form
+    let mut q = p.options.clone();
+    q[6].label = "Sign in now".into();
+    q[4].tags = String::new();
+    let out = render_options(RA_TAB, &q);
+    assert!(
+        out.contains("button ra.signin \"Sign in now\" ?ra.who=\n"),
+        "{out}"
+    );
+    assert_eq!(parse_options(&out).options, {
+        let mut again = parse_options(&out).options;
+        again.iter_mut().for_each(|o| o.raw.clear());
+        let mut want = q.clone();
+        want.iter_mut().for_each(|o| o.raw.clear());
+        for (a, w) in again.iter_mut().zip(want.iter()) {
+            a.line = w.line;
+        }
+        assert_eq!(again, want);
+        parse_options(&out).options
+    });
+}
+
+#[test]
+fn ends_of_a_line() {
+    // ? and @ as the last two words, in either order; inside quotes or not
+    // last, they are part of the value
+    let p =
+        parse_options("option a bool \"A\" on ?b=1 @lobby\noption b int \"B\" 0 3 1 @solo ?a=on\n");
+    assert!(
+        p.diagnostics
+            .iter()
+            .all(|d| d.severity == Severity::Warning),
+        "{:?}",
+        p.diagnostics
+    );
+    assert_eq!(
+        (p.options[0].when.as_str(), p.options[0].tags.as_str()),
+        ("b=1", "lobby")
+    );
+    assert_eq!(
+        (p.options[1].when.as_str(), p.options[1].tags.as_str()),
+        ("a=on", "solo")
+    );
+    let p = parse_options("option t text \"T\" 10 \"x ?y=1\"\n");
+    assert!(p.diagnostics.is_empty(), "{:?}", p.diagnostics);
+    assert_eq!(
+        (p.options[0].text.as_str(), p.options[0].when.as_str()),
+        ("x ?y=1", "")
+    );
+    // a ? without '=' is not a condition: it is part of the value
+    let p = parse_options("option c choice \"C\" a|b ?x");
+    assert_eq!(p.options[0].values, ["a", "b ?x"]);
+    assert!(p.options[0].when.is_empty());
+}
+
+#[test]
+fn version_7_refusals() {
+    assert!(msgs("option p secret \"P\" 64 \"d\"")[0].contains("secret option 'p'"));
+    assert!(msgs("option p secret \"P\" 65")[0].contains("1 to 64"));
+    assert!(msgs("option t text \"T\" 3 \"long\"")[0].contains("text option 't'"));
+    assert!(msgs("option t text \"T\" 0")[0].contains("text option 't'"));
+    assert!(parse_options("option t text \"T\" 64")
+        .diagnostics
+        .is_empty());
+    // help names an option above it
+    assert!(msgs("help a \"x\"\noption a bool \"A\" on")[0].contains("no option above"));
+    // a lobby rule is a bool, choice or int
+    assert!(msgs("option p secret \"P\" 8 @lobby")[0].contains("lobby rule"));
+    assert!(msgs("button go \"Go\" @lobby")[0].contains("lobby rule"));
+    // a key is declared once by any option, button or show line
+    assert!(msgs("option k bool \"K\" on\nshow k \"K\"")[0].contains("declared before"));
+    // a condition names a declared key, or the row always shows
+    let d = parse_options("show who \"Who\" ?nobody!=").diagnostics;
+    assert_eq!(d[0].severity, Severity::Warning);
+    assert!(d[0].message.contains("always shows"));
+    // a long tab title is cut
+    let d = parse_options(&format!("tab \"{}\"", "t".repeat(32))).diagnostics;
+    assert_eq!(d[0].severity, Severity::Warning);
+    // mode and yaml lines are kept as they are
+    let text = "mode solo \"Solo\" \"Alone.\"\noption a choice \"A\" x|y @solo\nyaml a goal x|y\n";
+    let p = parse_options(text);
+    assert_eq!(p.options.len(), 1);
+    assert_eq!(render_options(text, &p.options), text);
+}
+
 #[test]
 fn list_checks() {
     let mk = |key: &str| OptionDecl {

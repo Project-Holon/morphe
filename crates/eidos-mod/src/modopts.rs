@@ -1,20 +1,33 @@
 //! A mod's options file: the player-facing settings the manifest's
 //! `settings` key points at.
 //!
-//! The grammar follows eidos's `sdk/mod_menu.c` (`parse_option`,
-//! `read_declaration`, `bw_mod_menu_setting_get`) at 64aad0d:
+//! The grammar follows eidos's `sdk/mod_menu.c` (2ac9d2c, with the version 7
+//! lines of eidos docs/mod-services.md):
 //!
 //! ```text
 //! option <key> bool   "<label>" on|off
 //! option <key> choice "<label>" first|second|third
 //! option <key> int    "<label>" <min> <max> <default>
+//! option <key> text   "<label>" <longest> "<default>" [word]
+//! option <key> secret "<label>" <longest>
+//! heading "<text>"
+//! help <key> "<text>"
+//! tab "<title>"
+//! button <key> "<label>"
+//! show <key> "<label>"
 //! ```
 //!
 //! - a line is cut at the first `#` outside quotes (a quote toggles, so a
-//!   `#` inside a quoted label is text); a line that does not start with
-//!   `option` is skipped; a line is read up to 4095 bytes;
+//!   `#` inside a quoted label is text); a line that starts with another
+//!   word (`mode`, `yaml`, anything else) is kept as it is;
 //! - the key and the kind are words, the label is a quoted text (or a word),
 //!   and the value is the rest of the line;
+//! - option, button and show lines may end with two words, in either order:
+//!   `?key=value` or `?key!=value` (the row shows only while the option or
+//!   show row `key` has that value, or not; an empty value is "empty"), and
+//!   `@lobby` or `@<mode>,<mode>` (a co-op lobby rule, or the modes that
+//!   ask it). A `?` or `@` that is not one of the last words, or is inside
+//!   quotes, is part of the value;
 //! - a key is one word under 64 characters with no space, `=`, `#` or `"`;
 //!   dots are allowed;
 //! - a bool is `on`, `off`, `true`, `false`, `1` or `0`; any other text is
@@ -23,14 +36,23 @@
 //!   are dropped and the first name is the default;
 //! - an int has three whole numbers within a billion of zero, with
 //!   `min <= default <= max`;
-//! - a key declared twice is reported and the second line is ignored;
+//! - a text has a longest length from 1 to 64 and a default (it may be left
+//!   out) no longer than that, without `"`; a last word `word` makes it one
+//!   word (the game's keyboard has no space key); a secret (a password) has only
+//!   its longest length, is never written to disk and is never `@lobby`;
+//! - everything after a `tab` line goes on a Settings tab of its own until
+//!   the next `tab` line; a title holds 31 characters;
+//! - a `button` row sends the event setting.button to the mod; a `show` row
+//!   is text the mod sets, hidden while it is empty;
+//! - a key declared twice (by any option, button or show line) is reported
+//!   and the second line is ignored; a `help` line names an option above it;
 //! - there is no fixed number of options or names; the port stops at 4096
 //!   options and 1024 names of a choice, only to guard against a broken
 //!   file; labels are cut at 63 characters.
 //!
 //! The port ignores a line it refuses. The player's choices are stored as
-//! `key = number` lines, so a key has no `=`. A rule reads a key with
-//! `setting.<key>`, and a dotted key is read as written
+//! `key = number` lines, so a key has no `=`. A rule reads a bool, choice or
+//! int with `setting.<key>`, and a dotted key is read as written
 //! (`setting.nuzlocke.dupes`).
 //!
 //! [`parse_options`] and [`render_options`] round-trip a file: comments, blank
@@ -57,6 +79,10 @@ pub const CHOICES_MAX: usize = 1024;
 pub const CHOICE_LEN_MAX: usize = 31;
 /// The widest an int bound goes.
 pub const INT_LIMIT: i32 = 1_000_000_000;
+/// The longest a text or secret option may be.
+pub const TEXT_MAX: u32 = 64;
+/// The longest tab title.
+pub const TAB_TITLE_MAX: usize = 31;
 /// The bytes of a line the port reads.
 const LINE_MAX: usize = 4095;
 /// The file a new options list goes in.
@@ -69,6 +95,8 @@ pub enum OptionKind {
     Bool,
     Choice,
     Int,
+    Text,
+    Secret,
 }
 
 impl OptionKind {
@@ -77,17 +105,72 @@ impl OptionKind {
             OptionKind::Bool => "bool",
             OptionKind::Choice => "choice",
             OptionKind::Int => "int",
+            OptionKind::Text => "text",
+            OptionKind::Secret => "secret",
         }
+    }
+
+    /// The kinds a rule (`setting.<key>`) and `setting_get` read.
+    pub fn numeric(self) -> bool {
+        matches!(
+            self,
+            OptionKind::Bool | OptionKind::Choice | OptionKind::Int
+        )
     }
 }
 
-/// One option. `default` is 0 or 1 for a bool, 0 for a choice (the first
-/// name) and the number for an int. `line`, `lead`, `comment` and `raw` come
-/// from the file and go back to [`render_options`] unchanged: they keep the
-/// comments and the text of a line nobody edited.
+/// What a line of the file is.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Entry {
+    #[default]
+    Option,
+    Heading,
+    Help,
+    Tab,
+    Button,
+    Show,
+}
+
+impl Entry {
+    fn word(self) -> &'static str {
+        match self {
+            Entry::Option => "option",
+            Entry::Heading => "heading",
+            Entry::Help => "help",
+            Entry::Tab => "tab",
+            Entry::Button => "button",
+            Entry::Show => "show",
+        }
+    }
+
+    /// The lines that declare a key of their own.
+    fn declares(self) -> bool {
+        matches!(self, Entry::Option | Entry::Button | Entry::Show)
+    }
+}
+
+/// One line of the file the editor knows: an option, or a heading, help,
+/// tab, button or show line (`entry`).
+///
+/// - an option: `key`, `label`, `kind` and its value. `default` is 0 or 1
+///   for a bool, 0 for a choice (the first name) and the number for an int;
+///   for a text and a secret `max` is the longest length and `text` a
+///   text's default;
+/// - a heading or a tab: `label` is its text;
+/// - a help line: `key` names the option, `label` is the text;
+/// - a button or a show row: `key` and `label`.
+///
+/// `when` is the condition without its `?` (`ra.who!=`), `tags` the `@`
+/// word without its `@` (`lobby`); both are empty when absent.
+///
+/// `line`, `lead`, `comment` and `raw` come from the file and go back to
+/// [`render_options`] unchanged: they keep the comments and the text of a
+/// line nobody edited.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct OptionDecl {
+    pub entry: Entry,
     pub key: String,
     pub label: String,
     pub kind: OptionKind,
@@ -95,6 +178,11 @@ pub struct OptionDecl {
     pub min: i32,
     pub max: i32,
     pub values: Vec<String>,
+    pub text: String,
+    /// A text option of one word: the game's keyboard has no space key.
+    pub word: bool,
+    pub when: String,
+    pub tags: String,
     /// 1-based line in the file, 0 for a new option.
     pub line: u32,
     /// The comment lines right above the option.
@@ -162,6 +250,57 @@ fn split_comment(line: &str) -> (&str, &str) {
     (read, "")
 }
 
+/// The last word of `value` when it starts with `mark` after a space (or at
+/// the start, for `@`) outside quotes; `None` when the last such mark is not
+/// in the last word. As the port's `cut_when` and `cut_mode_tags`.
+fn cut_last(value: &str, mark: u8) -> Option<(&str, &str)> {
+    let b = value.as_bytes();
+    let mut quoted = false;
+    let mut found = None;
+    for (i, &c) in b.iter().enumerate() {
+        if c == b'"' {
+            quoted = !quoted;
+        } else if c == mark
+            && !quoted
+            && ((i > 0 && is_space(b[i - 1] as char)) || (i == 0 && mark == b'@'))
+        {
+            found = Some(i);
+        }
+    }
+    let at = found?;
+    let word = &value[at + 1..];
+    if word.contains(is_space) {
+        return None;
+    }
+    if mark == b'?' && !word.contains('=') {
+        return None;
+    }
+    Some((value[..at].trim_end(), word))
+}
+
+/// Cuts the condition and the `@` word off the end of a value, in either
+/// order: `(value, when, tags)`.
+fn cut_ends(value: &str) -> (&str, String, String) {
+    let mut v = value;
+    let mut when = String::new();
+    let mut tags = String::new();
+    if let Some((rest, w)) = cut_last(v, b'?') {
+        v = rest;
+        when = w.to_string();
+    }
+    if let Some((rest, t)) = cut_last(v, b'@') {
+        v = rest;
+        tags = t.to_string();
+    }
+    if when.is_empty() {
+        if let Some((rest, w)) = cut_last(v, b'?') {
+            v = rest;
+            when = w.to_string();
+        }
+    }
+    (v, when, tags)
+}
+
 /// A bool's value: `None` for text the port reports and ignores.
 fn bool_value(text: &str) -> Option<bool> {
     match text {
@@ -201,18 +340,91 @@ fn long_prefix(s: &str) -> Option<(i64, &str)> {
     Some((v, &t[sign_len + n..]))
 }
 
-/// One line. `Ok(None)` is a line the port skips without a word (blank, a
-/// comment, another keyword), `Err` is an option line it refuses.
-fn parse_line(line: &str) -> Result<Option<OptionDecl>, (usize, usize, String)> {
+type LineError = (usize, usize, String);
+
+/// One line. `Ok(None)` is a line the editor keeps as it is (blank, a
+/// comment, `mode`, `yaml`, another word), `Err` is a line the port refuses.
+fn parse_line(line: &str) -> Result<Option<OptionDecl>, LineError> {
     let (body, comment) = split_comment(line);
-    let Some((word, mut at)) = next_token(body, 0) else {
+    let Some((word, at)) = next_token(body, 0) else {
         return Ok(None);
     };
-    if word != "option" {
-        return Ok(None);
-    }
     let whole = (0, body.trim_end().len());
-    let mut take = |what: &str| -> Result<(&str, usize, usize), (usize, usize, String)> {
+    let entry = match word {
+        "option" => Entry::Option,
+        "heading" => Entry::Heading,
+        "help" => Entry::Help,
+        "tab" => Entry::Tab,
+        "button" => Entry::Button,
+        "show" => Entry::Show,
+        _ => return Ok(None),
+    };
+    let mut o = OptionDecl {
+        entry,
+        comment: comment.to_string(),
+        raw: line.to_string(),
+        ..OptionDecl::default()
+    };
+    let missing = |what: &str, form: &str| -> LineError {
+        (
+            whole.0,
+            whole.1,
+            format!(
+                "the {} line has no {what}: {form}; the game skips it",
+                entry.word()
+            ),
+        )
+    };
+    match entry {
+        Entry::Heading | Entry::Tab => {
+            let form = if entry == Entry::Tab {
+                "tab \"<title>\""
+            } else {
+                "heading \"<text>\""
+            };
+            let (text, _) = next_token(body, at).ok_or_else(|| missing("text", form))?;
+            o.label = text.to_string();
+            return Ok(Some(o));
+        }
+        Entry::Help => {
+            let form = "help <key> \"<text>\"";
+            let (key, at) = next_token(body, at).ok_or_else(|| missing("key", form))?;
+            let (text, _) = next_token(body, at).ok_or_else(|| missing("text", form))?;
+            o.key = key.to_string();
+            o.label = text.to_string();
+            return Ok(Some(o));
+        }
+        Entry::Button | Entry::Show => {
+            let form = format!("{} <key> \"<label>\"", entry.word());
+            let (key, at) = next_token(body, at).ok_or_else(|| missing("key", &form))?;
+            let (label, at) = next_token(body, at).ok_or_else(|| missing("label", &form))?;
+            if !key_valid(key) {
+                return Err(bad_key(whole, key));
+            }
+            // the space after the label stays, so a `?` or `@` right after
+            // it is a last word
+            let (rest, when, tags) = cut_ends(body[at..].trim_end());
+            let rest = rest.trim();
+            if !rest.is_empty() {
+                return Err((
+                    whole.0,
+                    whole.1,
+                    format!(
+                        "the {} line '{key}' has '{rest}' after its label; the game skips it",
+                        entry.word()
+                    ),
+                ));
+            }
+            o.key = key.to_string();
+            o.label = label.to_string();
+            o.when = when;
+            o.tags = tags;
+            return Ok(Some(o));
+        }
+        Entry::Option => {}
+    }
+    let mut at = at;
+    let mut take = |what: &str| -> Result<(&str, usize, usize), LineError> {
         let start = at;
         match next_token(body, at) {
             Some((t, next)) => {
@@ -223,7 +435,7 @@ fn parse_line(line: &str) -> Result<Option<OptionDecl>, (usize, usize, String)> 
                 whole.0,
                 whole.1,
                 format!(
-                    "the option line has no {what}: option <key> <bool|choice|int> \"<label>\" <value>; the game skips it"
+                    "the option line has no {what}: option <key> <bool|choice|int|text|secret> \"<label>\" <value>; the game skips it"
                 ),
             )),
         }
@@ -232,34 +444,22 @@ fn parse_line(line: &str) -> Result<Option<OptionDecl>, (usize, usize, String)> 
     let (kind_word, kind_from, kind_to) = take("kind")?;
     let (label, _, _) = take("label")?;
     if !key_valid(key) {
-        return Err((
-            whole.0,
-            whole.1,
-            format!(
-                "the option key '{key}' is empty, has a space, '=', '#' or a quote, or is over {KEY_MAX} characters; the game ignores it"
-            ),
-        ));
+        return Err(bad_key(whole, key));
     }
-    let value = body[at..].trim();
+    let (value, when, tags) = cut_ends(body[at..].trim());
     let value_at = body[at..].find(value).map_or(at, |i| at + i);
-    let mut o = OptionDecl {
-        key: key.to_string(),
-        label: label.to_string(),
-        comment: comment.to_string(),
-        raw: line.to_string(),
-        ..OptionDecl::default()
-    };
+    o.key = key.to_string();
+    o.label = label.to_string();
+    o.when = when;
+    o.tags = tags;
+    let bad = |msg: String| (value_at, value_at + value.len().max(1), msg);
     match kind_word {
         "bool" => {
             o.kind = OptionKind::Bool;
             let Some(on) = bool_value(value) else {
-                return Err((
-                    value_at,
-                    value_at + value.len().max(1),
-                    format!(
-                        "the bool option '{key}' has the value '{value}'; it takes on or off; the game ignores it"
-                    ),
-                ));
+                return Err(bad(format!(
+                    "the bool option '{key}' has the value '{value}'; it takes on or off; the game ignores it"
+                )));
             };
             o.default = i32::from(on);
         }
@@ -272,28 +472,23 @@ fn parse_line(line: &str) -> Result<Option<OptionDecl>, (usize, usize, String)> 
                 .map(str::to_string)
                 .collect();
             if o.values.is_empty() {
-                return Err((
-                    value_at,
-                    value_at + value.len().max(1),
-                    format!(
-                        "the option '{key}' names no choice: list the names with '|'; the game skips it"
-                    ),
-                ));
+                return Err(bad(format!(
+                    "the option '{key}' names no choice: list the names with '|'; the game skips it"
+                )));
             }
         }
         "int" => {
-            let bad = |msg: &str| (value_at, value_at + value.len().max(1), msg.to_string());
             let need = format!(
                 "the int option '{key}' needs '<min> <max> <default>' with min <= default <= max; the game skips it"
             );
             let Some((lo, rest)) = long_prefix(value) else {
-                return Err(bad(&need));
+                return Err(bad(need));
             };
             let Some((hi, rest)) = long_prefix(rest) else {
-                return Err(bad(&need));
+                return Err(bad(need));
             };
             let Some((def, rest)) = long_prefix(rest) else {
-                return Err(bad(&need));
+                return Err(bad(need));
             };
             let limit = i64::from(INT_LIMIT);
             if !rest.trim().is_empty()
@@ -303,24 +498,72 @@ fn parse_line(line: &str) -> Result<Option<OptionDecl>, (usize, usize, String)> 
                 || lo < -limit
                 || hi > limit
             {
-                return Err(bad(&need));
+                return Err(bad(need));
             }
             o.kind = OptionKind::Int;
             o.min = lo as i32;
             o.max = hi as i32;
             o.default = def as i32;
         }
+        "text" | "secret" => {
+            let secret = kind_word == "secret";
+            let need = if secret {
+                format!("the secret option '{key}' needs '<longest>' from 1 to {TEXT_MAX}; the game skips it")
+            } else {
+                format!(
+                    "the text option '{key}' needs '<longest> \"<default>\"' with 1 <= longest <= {TEXT_MAX}; the game skips it"
+                )
+            };
+            let Some((len, rest)) = long_prefix(value) else {
+                return Err(bad(need));
+            };
+            // a text may end with the word `word`: one word, no space key
+            let r = rest.trim_end();
+            let rest = match r.strip_suffix("word") {
+                Some(before) if !secret && (before.is_empty() || before.ends_with(is_space)) => {
+                    o.word = true;
+                    before
+                }
+                _ => rest,
+            };
+            let def = next_token(rest, 0);
+            let extra = def.map_or(rest, |(_, end)| &rest[end..]);
+            if !(1..=i64::from(TEXT_MAX)).contains(&len)
+                || !extra.trim().is_empty()
+                || (secret && def.is_some())
+                || def.is_some_and(|(d, _)| d.len() as i64 > len)
+            {
+                return Err(bad(need));
+            }
+            o.kind = if secret {
+                OptionKind::Secret
+            } else {
+                OptionKind::Text
+            };
+            o.max = len as i32;
+            o.text = def.map_or(String::new(), |(d, _)| d.to_string());
+        }
         other => {
             return Err((
                 kind_from,
                 kind_to,
                 format!(
-                    "the option '{key}' has the unknown kind '{other}' (bool, choice or int); the game skips it"
+                    "the option '{key}' has the unknown kind '{other}' (bool, choice, int, text or secret); the game skips it"
                 ),
             ));
         }
     }
     Ok(Some(o))
+}
+
+fn bad_key(whole: (usize, usize), key: &str) -> LineError {
+    (
+        whole.0,
+        whole.1,
+        format!(
+            "the option key '{key}' is empty, has a space, '=', '#' or a quote, or is over {KEY_MAX} characters; the game ignores it"
+        ),
+    )
 }
 
 /// The pieces of a file, in order.
@@ -329,8 +572,8 @@ enum Piece {
     Slot,
 }
 
-/// Splits `text` into raw lines and option slots. The comment lines right
-/// above an option are the option's `lead`.
+/// Splits `text` into raw lines and entry slots. The comment lines right
+/// above an entry are its `lead`.
 fn pieces(text: &str) -> (Vec<Piece>, Vec<OptionDecl>, Vec<Diagnostic>) {
     let mut out: Vec<Piece> = Vec::new();
     let mut opts: Vec<OptionDecl> = Vec::new();
@@ -392,9 +635,15 @@ pub fn rule_readable(key: &str) -> bool {
     })
 }
 
-/// The problems of a list of options. A problem of option `n` (0-based) has
-/// the field `option:n`, and a problem of the list the field `options`. When
-/// the option comes from a file the diagnostic also has its line.
+/// The key a condition names: `ra.who` of `ra.who!=` or `ra.who=x`.
+fn when_key(when: &str) -> &str {
+    let eq = when.find('=').unwrap_or(when.len());
+    when[..eq].strip_suffix('!').unwrap_or(&when[..eq])
+}
+
+/// The problems of a list of entries. A problem of entry `n` (0-based) has
+/// the field `option:n`. When the entry comes from a file the diagnostic
+/// also has its line.
 pub fn check_options(options: &[OptionDecl]) -> Vec<Diagnostic> {
     use Severity::{Error, Warning};
     let mut out = Vec::new();
@@ -403,9 +652,52 @@ pub fn check_options(options: &[OptionDecl]) -> Vec<Diagnostic> {
         d.line = options[i].line;
         out.push(d);
     };
+    let keys: BTreeSet<&str> = options
+        .iter()
+        .filter(|o| o.entry.declares())
+        .map(|o| o.key.as_str())
+        .collect();
     let mut seen: BTreeSet<&str> = BTreeSet::new();
+    let mut option_count = 0;
     for (i, o) in options.iter().enumerate() {
-        if i >= OPTIONS_MAX {
+        match o.entry {
+            Entry::Heading | Entry::Tab => {
+                if o.label.contains('"') {
+                    at(i, Error, "the text has no quote");
+                } else if o.label.trim().is_empty() {
+                    at(i, Warning, &format!("the {} has no text", o.entry.word()));
+                }
+                if o.entry == Entry::Tab && o.label.len() > TAB_TITLE_MAX {
+                    at(
+                        i,
+                        Warning,
+                        &format!(
+                            "a tab title is {TAB_TITLE_MAX} characters at most; the game cuts it"
+                        ),
+                    );
+                }
+                continue;
+            }
+            Entry::Help => {
+                if !options[..i]
+                    .iter()
+                    .any(|p| p.entry == Entry::Option && p.key == o.key)
+                {
+                    at(
+                        i,
+                        Error,
+                        &format!("the help line names '{}', which no option above declares; the game ignores it", o.key),
+                    );
+                }
+                if o.label.contains('"') {
+                    at(i, Error, "the text has no quote");
+                }
+                continue;
+            }
+            Entry::Option => option_count += 1,
+            Entry::Button | Entry::Show => {}
+        }
+        if option_count > OPTIONS_MAX && o.entry == Entry::Option {
             at(
                 i,
                 Error,
@@ -431,7 +723,7 @@ pub fn check_options(options: &[OptionDecl]) -> Vec<Diagnostic> {
                     ),
                 );
             }
-            if !rule_readable(&o.key) {
+            if o.entry == Entry::Option && o.kind.numeric() && !rule_readable(&o.key) {
                 at(
                     i,
                     Warning,
@@ -449,13 +741,36 @@ pub fn check_options(options: &[OptionDecl]) -> Vec<Diagnostic> {
         if o.label.contains('"') {
             at(i, Error, "a label has no quote");
         } else if o.label.trim().is_empty() {
-            at(i, Warning, "the option has no label to show");
+            at(i, Warning, "the row has no label to show");
         } else if o.label.len() > LABEL_MAX {
             at(
                 i,
                 Warning,
                 &format!("a label is {LABEL_MAX} characters at most; the game cuts it"),
             );
+        }
+        if !o.when.is_empty() {
+            let k = when_key(&o.when);
+            if !o.when.contains('=') || k.is_empty() {
+                at(i, Error, "a condition is ?key=value or ?key!=value");
+            } else if !keys.contains(k) {
+                at(
+                    i,
+                    Warning,
+                    &format!("no option or show row is called '{k}', so the row always shows"),
+                );
+            }
+        }
+        let lobby = o.tags.split(',').any(|t| t == "lobby");
+        if lobby && !(o.entry == Entry::Option && o.kind.numeric()) {
+            at(
+                i,
+                Error,
+                "only a bool, choice or int option can be a lobby rule (@lobby)",
+            );
+        }
+        if o.entry != Entry::Option {
+            continue;
         }
         match o.kind {
             OptionKind::Bool => {
@@ -505,6 +820,29 @@ pub fn check_options(options: &[OptionDecl]) -> Vec<Diagnostic> {
                     at(i, Error, "an int is within a billion of zero");
                 }
             }
+            OptionKind::Text | OptionKind::Secret => {
+                if o.max < 1 || o.max as u32 > TEXT_MAX {
+                    at(
+                        i,
+                        Error,
+                        &format!("the longest length is from 1 to {TEXT_MAX}"),
+                    );
+                }
+                if o.kind == OptionKind::Secret && !o.text.is_empty() {
+                    at(i, Error, "a secret has no default");
+                }
+                if o.text.contains('"') || o.text.contains(['\n', '\r']) {
+                    at(i, Error, "a text's default has no quote or line break");
+                } else if o.text.len() > o.max.max(0) as usize {
+                    at(i, Error, "the default is longer than the longest length");
+                }
+                if o.word && o.text.contains(is_space) {
+                    at(i, Error, "a one-word text's default has no space");
+                }
+            }
+        }
+        if o.word && o.kind != OptionKind::Text {
+            at(i, Error, "only a text option is one word");
         }
     }
     out
@@ -515,13 +853,18 @@ pub fn check_options(options: &[OptionDecl]) -> Vec<Diagnostic> {
 // ---------------------------------------------------------------------
 
 fn same(a: &OptionDecl, b: &OptionDecl) -> bool {
-    a.key == b.key
+    a.entry == b.entry
+        && a.key == b.key
         && a.label == b.label
         && a.kind == b.kind
         && a.default == b.default
         && a.min == b.min
         && a.max == b.max
         && a.values == b.values
+        && a.text == b.text
+        && a.word == b.word
+        && a.when == b.when
+        && a.tags == b.tags
 }
 
 fn value_text(o: &OptionDecl) -> String {
@@ -529,21 +872,48 @@ fn value_text(o: &OptionDecl) -> String {
         OptionKind::Bool => (if o.default != 0 { "on" } else { "off" }).to_string(),
         OptionKind::Choice => o.values.join("|"),
         OptionKind::Int => format!("{} {} {}", o.min, o.max, o.default),
+        OptionKind::Text => format!(
+            "{} \"{}\"{}",
+            o.max,
+            o.text,
+            if o.word { " word" } else { "" }
+        ),
+        OptionKind::Secret => o.max.to_string(),
     }
 }
 
-/// The text of one option line, its columns padded to `widths` (key, label).
+/// ` ?when @tags`, as the line ends.
+fn ends_text(o: &OptionDecl) -> String {
+    let mut s = String::new();
+    if !o.when.is_empty() {
+        s.push_str(&format!(" ?{}", o.when));
+    }
+    if !o.tags.is_empty() {
+        s.push_str(&format!(" @{}", o.tags));
+    }
+    s
+}
+
+/// The text of one line, the option columns padded to `widths` (key, label).
 fn render_line(o: &OptionDecl, widths: (usize, usize)) -> String {
     let label = format!("\"{}\"", o.label);
-    let mut s = format!(
-        "option {:<kw$}  {:<6}  {:<lw$}  {}",
-        o.key,
-        o.kind.word(),
-        label,
-        value_text(o),
-        kw = widths.0,
-        lw = widths.1,
-    );
+    let mut s = match o.entry {
+        Entry::Option => format!(
+            "option {:<kw$}  {:<6}  {:<lw$}  {}{}",
+            o.key,
+            o.kind.word(),
+            label,
+            value_text(o),
+            ends_text(o),
+            kw = widths.0,
+            lw = widths.1,
+        ),
+        Entry::Heading | Entry::Tab => format!("{} {label}", o.entry.word()),
+        Entry::Help => format!("help {} {label}", o.key),
+        Entry::Button | Entry::Show => {
+            format!("{} {} {label}{}", o.entry.word(), o.key, ends_text(o))
+        }
+    };
     if !o.comment.trim().is_empty() {
         s.push_str("  ");
         s.push_str(o.comment.trim());
@@ -551,17 +921,18 @@ fn render_line(o: &OptionDecl, widths: (usize, usize)) -> String {
     s.trim_end().to_string()
 }
 
-/// `text` with its options replaced by `options`, in that order. Comments,
-/// blank lines and lines the port skips stay where they are; the comment lines
-/// above an option move with it; a line whose option nobody edited stays as
-/// it is. The options fill the places of the old ones in order, and extra
-/// ones go after the last.
+/// `text` with its entries replaced by `options`, in that order. Comments,
+/// blank lines and lines the editor keeps (`mode`, `yaml`, lines the port
+/// skips) stay where they are; the comment lines above an entry move with
+/// it; a line nobody edited stays as it is. The entries fill the places of
+/// the old ones in order, and extra ones go after the last.
 pub fn render_options(text: &str, options: &[OptionDecl]) -> String {
     let crlf = text.contains("\r\n");
     let (parts, _, _) = pieces(text);
+    let opts = options.iter().filter(|o| o.entry == Entry::Option);
     let widths = (
-        options.iter().map(|o| o.key.len()).max().unwrap_or(0),
-        options.iter().map(|o| o.label.len() + 2).max().unwrap_or(0),
+        opts.clone().map(|o| o.key.len()).max().unwrap_or(0),
+        opts.map(|o| o.label.len() + 2).max().unwrap_or(0),
     );
     let line_of = |o: &OptionDecl, out: &mut Vec<String>| {
         out.extend(o.lead.iter().cloned());
@@ -714,7 +1085,8 @@ pub fn write_options_file(root: &Path, options: &[OptionDecl]) -> io::Result<Opt
 pub struct SettingsCtx {
     /// The mod has a namespace, so it has settings.
     pub namespace: bool,
-    /// The keys of the options the port loads.
+    /// The keys of the bool, choice and int options the port loads: the
+    /// ones a rule reads.
     pub keys: BTreeSet<String>,
 }
 
@@ -733,7 +1105,9 @@ pub fn settings_ctx(root: &Path) -> io::Result<SettingsCtx> {
         keys: file
             .options
             .into_iter()
+            .filter(|o| o.entry == Entry::Option)
             .take(OPTIONS_MAX)
+            .filter(|o| o.kind.numeric())
             .map(|o| o.key)
             .collect(),
     })

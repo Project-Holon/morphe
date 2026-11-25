@@ -2,11 +2,16 @@
 crates/eidos-mod/src/modsdk/v7/libc/src, with the small edits listed below,
 and the license of each project into libc/licenses.
 
-    python -I tools/libc-vendor.py <musl> <printf> <tlsf> <openbsd>
+    python -I tools/libc-vendor.py <musl> <printf> <tlsf> <openbsd> <compiler-rt>
 
 <musl> is a musl checkout (git.musl-libc.org/musl), <printf> an
-eyalroz/printf checkout, <tlsf> a mattconte/tlsf checkout, and <openbsd> a
-folder with OpenBSD's lib/libc/stdlib/strto{l,ul,ll,ull}.c. Each copied file
+eyalroz/printf checkout, <tlsf> a mattconte/tlsf checkout, <openbsd> a
+folder with OpenBSD's lib/libc/stdlib/strto{l,ul,ll,ull}.c, and
+<compiler-rt> the compiler-rt folder of an llvm-project checkout (tag
+llvmorg-21.1.0). From compiler-rt come `__trunctfdf2` (128-bit long double
+to double), which printf's `%Lf` calls, and the 128-bit shifts it uses
+(`__ashlti3`, `__lshrti3`): zig cc links them on its own, clang with
+-nostdlib does not. Their files are copied unchanged. Each copied file
 starts with a line naming where it came from. The edits only remove what a
 mod has no use for or cannot build (locales, aliases, musl's internal
 headers); they change no code path:
@@ -57,6 +62,12 @@ MUSL = [
     "time/__month_to_secs.c", "time/gmtime_r.c", "time/gmtime.c", "time/timegm.c",
 ]
 OPENBSD = ["strtol.c", "strtoul.c", "strtoll.c", "strtoull.c"]
+# trunctfdf2.c, the 128-bit shifts it calls and the headers they include,
+# from lib/builtins
+COMPILER_RT = [
+    "trunctfdf2.c", "ashlti3.c", "lshrti3.c", "fp_trunc_impl.inc", "fp_trunc.h", "fp_lib.h", "int_lib.h",
+    "int_types.h", "int_endianness.h", "int_util.h", "int_math.h",
+]
 
 
 def musl_edit(text):
@@ -88,7 +99,7 @@ def head(origin, text):
 
 
 def main():
-    musl, printf, tlsf, openbsd = sys.argv[1:5]
+    musl, printf, tlsf, openbsd, crt = sys.argv[1:6]
     src = os.path.join(LIBC, "src")
     lic = os.path.join(LIBC, "licenses")
     os.makedirs(src, exist_ok=True)
@@ -108,6 +119,9 @@ def main():
                            open(os.path.join(printf, "src", "printf", "printf.c"), encoding="utf-8").read())
     out["tlsf.c"] = head("mattconte/tlsf tlsf.c", open(os.path.join(tlsf, "tlsf.c"), encoding="utf-8").read())
     out["tlsf.h"] = head("mattconte/tlsf tlsf.h", open(os.path.join(tlsf, "tlsf.h"), encoding="utf-8").read())
+    for name in COMPILER_RT:
+        text = open(os.path.join(crt, "lib", "builtins", name), encoding="utf-8").read()
+        out[name] = head(f"LLVM compiler-rt lib/builtins/{name} (llvmorg-21.1.0)", text)
     for old, new in renames:
         for name in out:
             out[name] = re.sub(rf"\b{old}\b", new, out[name])
@@ -123,6 +137,7 @@ def main():
     # TLSF and OpenBSD files carry in their heads
     shutil.copy(os.path.join(musl, "COPYRIGHT"), os.path.join(lic, "musl-COPYRIGHT"))
     shutil.copy(os.path.join(printf, "LICENSE"), os.path.join(lic, "printf-LICENSE"))
+    shutil.copy(os.path.join(crt, "LICENSE.TXT"), os.path.join(lic, "compiler-rt-LICENSE"))
     tl = open(os.path.join(tlsf, "tlsf.h"), encoding="utf-8").read()
     notice = re.search(r"/\*+\s*\n(.*?Copyright.*?)\*/", tl, re.S)
     open(os.path.join(lic, "tlsf-LICENSE"), "w", encoding="utf-8", newline="\n").write(

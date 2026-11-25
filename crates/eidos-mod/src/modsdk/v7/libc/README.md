@@ -26,6 +26,7 @@ already built.
 | math.h | fmod | musl |
 | math.h | floor, ceil, trunc, fabs, sqrt | `src/math.c` (one WebAssembly instruction each) |
 | errno.h, assert.h | errno, assert, abort | `src/misc.c` |
+| (none) | `__trunctfdf2` and the 128-bit shifts it uses, which printf's `%Lf` calls: on wasm32 a long double has 128 bits | LLVM compiler-rt |
 
 The compiler leaves out what a mod does not call, so a mod pays only for the
 functions it uses.
@@ -66,6 +67,7 @@ The licenses are in `licenses/`.
 | eyalroz/printf | git 22318ed (2026-06-27) | MIT, `licenses/printf-LICENSE` |
 | mattconte/tlsf | git deff9ab (3.1) | BSD 3-clause, `licenses/tlsf-LICENSE` |
 | OpenBSD libc | strtol.c 1.12, strtoul.c 1.11, strtoll.c 1.10, strtoull.c 1.9 | BSD 3-clause, `licenses/openbsd-LICENSE` |
+| LLVM compiler-rt | llvmorg-21.1.0, lib/builtins: trunctfdf2.c, ashlti3.c, lshrti3.c and their headers, unchanged | Apache 2.0 with LLVM exceptions, `licenses/compiler-rt-LICENSE` |
 
 The headers and the files in `src/` that name no project above (malloc.c,
 stdio.c, time.c, math.c, misc.c, time_impl.h) are the library's own: the

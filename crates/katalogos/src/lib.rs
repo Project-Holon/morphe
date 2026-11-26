@@ -112,6 +112,11 @@ pub struct Entry {
     pub repo: Option<String>,
     #[serde(default)]
     pub version: Option<String>,
+    /// A mod of this repository that is someone else's work, converted
+    /// without its author: the launcher marks it Unofficial and lists it
+    /// after the official mods.  Only with `mod`.
+    #[serde(default)]
+    pub unofficial: bool,
 }
 
 impl Entry {
@@ -494,6 +499,9 @@ pub fn entry_shape(e: &Entry) -> Result<(), String> {
             if !valid_repo(r) {
                 return Err("not owner/name".into());
             }
+            if e.unofficial {
+                return Err("`unofficial` is for a mod of this repository (`mod`); another repository's mod is not official already".into());
+            }
             if let Some(v) = &e.version {
                 version_of(v).ok_or("the pinned version is not x.y.z")?;
             }
@@ -565,7 +573,14 @@ pub fn check(index_path: &Path) -> Result<usize, String> {
                     let bw = fs::read(out.join(PACKAGE)).map_err(|e| e.to_string())?;
                     let icon = fs::read(out.join(ICON_FILE)).ok();
                     verify(&j, &bw, icon.as_deref(), &tmp)?;
-                    return Ok((j, " [official, not released yet]"));
+                    return Ok((
+                        j,
+                        if e.unofficial {
+                            " [unofficial, not released yet]"
+                        } else {
+                            " [official, not released yet]"
+                        },
+                    ));
                 }
             }
             let j: ModJson = serde_json::from_slice(&fetch(&release_url(e, "mod.json"), 1 << 20)?)
@@ -584,7 +599,9 @@ pub fn check(index_path: &Path) -> Result<usize, String> {
             verify(&j, &bw, icon.as_deref(), &tmp)?;
             Ok((
                 j,
-                if e.official.is_some() {
+                if e.unofficial {
+                    " [unofficial]"
+                } else if e.official.is_some() {
                     " [official]"
                 } else {
                     ""
@@ -804,18 +821,34 @@ mod tests {
             official: Some("x".into()),
             repo: Some("a/b".into()),
             version: Some("1.0.0".into()),
+            ..Default::default()
         };
         assert!(entry_shape(&both).is_err());
+        // `unofficial` marks a mod of this repository, never another's
+        let conversion = Entry {
+            official: Some("x".into()),
+            version: Some("1.0.0".into()),
+            unofficial: true,
+            ..Default::default()
+        };
+        assert!(entry_shape(&conversion).is_ok());
+        let marked_repo = Entry {
+            repo: Some("a/b".into()),
+            unofficial: true,
+            ..Default::default()
+        };
+        assert!(entry_shape(&marked_repo).is_err());
         let unversioned = Entry {
             official: Some("x".into()),
             ..Default::default()
         };
         assert!(entry_shape(&unversioned).is_err());
         let idx: Index = serde_json::from_str(
-            r#"{"format":1,"mods":[{"mod":"nuzlocke","version":"1.0.0"},{"repo":"a/b"}]}"#,
+            r#"{"format":1,"mods":[{"mod":"nuzlocke","version":"1.0.0"},{"repo":"a/b"},{"mod":"x","version":"1.0.0","unofficial":true}]}"#,
         )
         .unwrap();
         assert_eq!(idx.mods[0].label(), "katalogos/nuzlocke");
         assert_eq!(idx.mods[1].label(), "a/b");
+        assert!(!idx.mods[0].unofficial && idx.mods[2].unofficial);
     }
 }

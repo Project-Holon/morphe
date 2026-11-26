@@ -117,7 +117,16 @@ pub struct Entry {
     /// after the official mods.  Only with `mod`.
     #[serde(default)]
     pub unofficial: bool,
+    /// A Project Holon mod kept in its own repository (`"official": true`):
+    /// the launcher shows it with the Official badge, among the official
+    /// mods.  Only with `repo`, and only for a repository of
+    /// [`OFFICIAL_OWNER`].
+    #[serde(default, rename = "official")]
+    pub marked_official: bool,
 }
+
+/// The GitHub owner whose repositories the index may mark official.
+pub const OFFICIAL_OWNER: &str = "Project-Holon";
 
 impl Entry {
     /// The name the check prints.
@@ -489,6 +498,9 @@ pub fn entry_shape(e: &Entry) -> Result<(), String> {
             if !valid_id(id) {
                 return Err(format!("{id} is not an official mod id (a-z, 0-9, -)"));
             }
+            if e.marked_official {
+                return Err("`official` is for a repository (`repo`); a mod of this repository is official already".into());
+            }
             let v = e
                 .version
                 .as_deref()
@@ -501,6 +513,11 @@ pub fn entry_shape(e: &Entry) -> Result<(), String> {
             }
             if e.unofficial {
                 return Err("`unofficial` is for a mod of this repository (`mod`); another repository's mod is not official already".into());
+            }
+            if e.marked_official && r.split('/').next() != Some(OFFICIAL_OWNER) {
+                return Err(format!(
+                    "`official` is for a repository of {OFFICIAL_OWNER}; {r} is another owner's"
+                ));
             }
             if let Some(v) = &e.version {
                 version_of(v).ok_or("the pinned version is not x.y.z")?;
@@ -601,7 +618,7 @@ pub fn check(index_path: &Path) -> Result<usize, String> {
                 j,
                 if e.unofficial {
                     " [unofficial]"
-                } else if e.official.is_some() {
+                } else if e.official.is_some() || e.marked_official {
                     " [official]"
                 } else {
                     ""
@@ -838,6 +855,32 @@ mod tests {
             ..Default::default()
         };
         assert!(entry_shape(&marked_repo).is_err());
+        // `official` marks a Project Holon repository, never another
+        // owner's, and never a `mod` entry (it is official already)
+        let own = Entry {
+            repo: Some("Project-Holon/arkhipelagos".into()),
+            marked_official: true,
+            ..Default::default()
+        };
+        assert!(entry_shape(&own).is_ok());
+        let others = Entry {
+            repo: Some("someone/some-mod".into()),
+            marked_official: true,
+            ..Default::default()
+        };
+        assert!(entry_shape(&others).is_err());
+        let both_marks = Entry {
+            official: Some("x".into()),
+            version: Some("1.0.0".into()),
+            marked_official: true,
+            ..Default::default()
+        };
+        assert!(entry_shape(&both_marks).is_err());
+        let idx: Index = serde_json::from_str(
+            r#"{"format":1,"mods":[{"repo":"Project-Holon/arkhipelagos","official":true}]}"#,
+        )
+        .unwrap();
+        assert!(idx.mods[0].marked_official && idx.mods[0].official.is_none());
         let unversioned = Entry {
             official: Some("x".into()),
             ..Default::default()

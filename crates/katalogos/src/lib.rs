@@ -26,6 +26,7 @@
 //! `net` feature (on by default) adds what downloads: `check` and
 //! `pending`.
 
+use std::collections::BTreeMap;
 use std::fs;
 #[cfg(feature = "net")]
 use std::io::Read;
@@ -62,6 +63,13 @@ pub struct ModJson {
     pub version: String,
     pub author: String,
     pub description: String,
+    /// The name and the description in other languages (`fr`, `de`, `it`,
+    /// `es`): the manifest's `name.<lang>` and `description.<lang>` lines.
+    /// A language without one shows `name` / `description`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub names: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub descriptions: BTreeMap<String, String>,
     pub repo: String,
     /// An official mod's folder in this repository (`mods/<id>`).
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -87,6 +95,27 @@ pub struct ModJson {
     pub has_code: bool,
     pub rules: usize,
     pub package: Package,
+}
+
+/// The languages a mod's text may have besides its own (eidos plays these).
+pub const LANGUAGES: [&str; 5] = ["en", "fr", "de", "it", "es"];
+
+/// The manifest's `<key>.<lang>` lines: the last non-empty one per language.
+fn by_language(m: &eidos_mod::manifest::Manifest, key: &str) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    for line in &m.other {
+        let Some((k, v)) = line.split_once('=') else {
+            continue;
+        };
+        let Some(lang) = k.trim().strip_prefix(key).and_then(|r| r.strip_prefix('.')) else {
+            continue;
+        };
+        let v = v.trim();
+        if LANGUAGES.contains(&lang) && !v.is_empty() {
+            out.insert(lang.to_string(), v.to_string());
+        }
+    }
+    out
 }
 
 /// The file name a release gives a mod's own icon.
@@ -326,6 +355,8 @@ pub fn pack(dir: &Path, origin: &Origin, version: &str, out: &Path) -> Result<Mo
             m.author.trim().to_string()
         },
         description: m.description.trim().to_string(),
+        names: by_language(&m, "name"),
+        descriptions: by_language(&m, "description"),
         repo: repo.to_string(),
         path,
         official,
@@ -679,10 +710,23 @@ mod tests {
     fn packs_and_verifies() {
         let t = tempfile::tempdir().unwrap();
         let m = t.path().join("mod");
-        sample(&m, "tags = Challenge, rules\nversion = 1.2.0\n");
+        sample(
+            &m,
+            "tags = Challenge, rules\nversion = 1.2.0\nname.fr = Exemple\ndescription.fr = Une règle.\ndescription.de =\nname.xx = Nope\n",
+        );
         let out = t.path().join("dist");
         let j = pack(&m, &repo("someone/sample"), "v1.2.0", &out).unwrap();
         assert_eq!(j.id, "someone/sample");
+        // Other languages: the manifest's name.<lang> / description.<lang>,
+        // empty lines and unknown languages left out.
+        assert_eq!(
+            j.names,
+            BTreeMap::from([("fr".to_string(), "Exemple".to_string())])
+        );
+        assert_eq!(
+            j.descriptions,
+            BTreeMap::from([("fr".to_string(), "Une règle.".to_string())])
+        );
         assert_eq!(j.version, "1.2.0");
         assert_eq!(j.author, "someone");
         assert_eq!(j.games, vec!["black", "white"]);

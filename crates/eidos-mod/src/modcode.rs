@@ -935,6 +935,22 @@ impl<'a> Parser<'a> {
                 Ok(())
             }
             "gift" => self.gift(),
+            // ask <text> [<tag>] (interface 7): the answer comes as the
+            // event confirm.done with the tag (0 when none).
+            "ask" => {
+                let q = self.expr()?;
+                let tag = (self.tok.kind != Tk::End)
+                    .then(|| self.expr())
+                    .transpose()?;
+                self.at_end("the action has more than it needs")?;
+                if q != Ty::Text && q != Ty::Int {
+                    return self.fail("the question must be a text or a number");
+                }
+                if tag.is_some_and(|t| !t.is_number()) {
+                    return self.fail("the question's tag must be a number");
+                }
+                Ok(())
+            }
             _ => Err(PErr {
                 start: 0,
                 end: 0,

@@ -18,7 +18,7 @@ fn errors(text: &str, ev: Option<&str>) -> Vec<String> {
 #[test]
 fn tables_have_the_ports_counts() {
     let n = rule_names();
-    assert_eq!(n.events.len(), 78);
+    assert_eq!(n.events.len(), 81);
     assert_eq!(n.states.len(), 66);
     let wild = n.event("encounter.wild").unwrap();
     assert!(wild.fields.iter().any(|f| f.name == "double"));
@@ -339,6 +339,9 @@ fn actions_state_and_heal_hp() {
     assert!(bad(" when setting == 1\n do message 1\n")[0].contains("'.' was expected"));
     assert!(bad(" when setting.\n do message 1\n")[0].contains("key was expected"));
     assert!(bad(" do set event.amount 1\n")[0].contains("no field"));
+    assert!(bad(" do ask \"Trade?\" \"two\"\n")[0].contains("tag must be a number"));
+    assert!(bad(" do ask \"Trade?\" 2 3\n")[0].contains("more than it needs"));
+    assert!(bad(" do ask event.mon\n")[0].contains("a text or a number"));
     // Every action the port names is one the checker knows.
     let table = include_str!("../src/modnames/rules.txt");
     for line in table.lines().filter(|l| l.starts_with("action ")) {
@@ -352,6 +355,7 @@ fn actions_state_and_heal_hp() {
             "box" => " do box 0 3".to_string(),
             "withdraw" => " do withdraw 0 1".to_string(),
             "gift" => " do gift \"cards/a.pgf\"".to_string(),
+            "ask" => " do ask \"Trade?\" 2".to_string(),
             other => panic!("the port has an action kenon does not check: {other}"),
         };
         let text = format!("language 1\nrule r on dex.register\n{body}\n");
